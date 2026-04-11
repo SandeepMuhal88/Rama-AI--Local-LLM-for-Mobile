@@ -1,0 +1,5 @@
+package com.example.rama_ai
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()
