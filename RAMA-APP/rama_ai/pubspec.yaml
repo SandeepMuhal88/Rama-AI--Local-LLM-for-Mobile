@@ -1,8 +1,8 @@
 name: rama_ai
-description: "A new Flutter project."
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+description: "RAMA AI — 100% offline on-device LLM chatbot for Android"
+publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.11.4
@@ -15,15 +15,13 @@ dependencies:
   path_provider: ^2.1.2
   dio: ^5.4.0
   permission_handler: ^11.3.1
+  shared_preferences: ^2.3.2
+  file_picker: ^8.1.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
 
-
-# The following section is specific to Flutter packages.
 flutter:
-
-
   uses-material-design: true

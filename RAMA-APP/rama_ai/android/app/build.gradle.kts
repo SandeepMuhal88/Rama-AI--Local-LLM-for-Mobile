@@ -7,7 +7,7 @@ plugins {
 android {
 
     namespace = "com.example.rama_ai"
-    compileSdk = 35
+    compileSdk = 36
 
     ndkVersion = "28.2.13676358"
 
