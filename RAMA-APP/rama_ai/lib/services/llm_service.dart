@@ -1,5 +1,6 @@
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -9,40 +10,58 @@ typedef _RunModelNative = Pointer<Utf8> Function(
 typedef _RunModelDart = Pointer<Utf8> Function(
     Pointer<Utf8> modelPath, Pointer<Utf8> prompt);
 
-// ─── LLM Service ─────────────────────────────────────────────────────────────
-class LLMService {
-  static DynamicLibrary? _lib;
-  static _RunModelDart?  _runFn;
+// ─── Top-level function for Isolate.run() ─────────────────────────────────────
+// Must be top-level (not a closure) so Isolate.run can spawn it.
+// Each isolate gets its own copy of static state, so the library is loaded
+// fresh and safely in the new isolate's context.
+String _runInIsolate(List<String> args) {
+  final modelPath = args[0];
+  final prompt    = args[1];
 
-  static void _ensureLoaded() {
-    if (_lib != null) return;
-    _lib  = DynamicLibrary.open('libllama_lib.so');
-    _runFn = _lib!
-        .lookupFunction<_RunModelNative, _RunModelDart>('run_model_path');
+  try {
+    final lib   = DynamicLibrary.open('libllama_lib.so');
+    final runFn = lib.lookupFunction<_RunModelNative, _RunModelDart>(
+        'run_model_path');
+
+    final mpPtr     = modelPath.toNativeUtf8();
+    final pPtr      = prompt.toNativeUtf8();
+    final resultPtr = runFn(mpPtr, pPtr);
+    final text      = resultPtr.toDartString();
+
+    malloc.free(mpPtr);
+    malloc.free(pPtr);
+
+    return text.isEmpty ? '(No response generated)' : text;
+  } catch (e, st) {
+    return 'Error: $e\n$st';
   }
+}
 
-  /// Run inference on the given model file with the given prompt.
-  /// Always called from a background Isolate via compute().
-  Future<String> run(String modelPath, String prompt) async {
+// ─── LLM Service ──────────────────────────────────────────────────────────────
+class LLMService {
+  /// Guards against re-entrant calls while inference is running.
+  static bool _busy = false;
+
+  /// Run inference in a dedicated Isolate.
+  /// Isolate.run() is safe for FFI (unlike compute()) because each invocation
+  /// creates a fresh isolate that loads the .so from scratch, then exits —
+  /// no shared mutable state between calls.
+  static Future<String> runInference(String modelPath, String prompt) async {
     if (!Platform.isAndroid) return 'FFI only supported on Android.';
 
-    // Brief yield so the UI "thinking" state is rendered before blocking
-    await Future<void>.delayed(Duration.zero);
+    // Safety guard: reject re-entrant calls while the model is running
+    if (_busy) return 'Error: Inference already in progress. Please wait.';
+    _busy = true;
 
     try {
-      _ensureLoaded();
-
-      final mpPtr     = modelPath.toNativeUtf8();
-      final pPtr      = prompt.toNativeUtf8();
-      final resultPtr = _runFn!(mpPtr, pPtr);
-      final text      = resultPtr.toDartString();
-
-      malloc.free(mpPtr);
-      malloc.free(pPtr);
-
-      return text.isEmpty ? '(No response generated)' : text;
+      final result = await Isolate.run(
+        () => _runInIsolate([modelPath, prompt]),
+      );
+      return result;
     } catch (e, st) {
       return 'Error: $e\n$st';
+    } finally {
+      _busy = false;
     }
   }
 
@@ -75,3 +94,4 @@ class LLMService {
       ..sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
   }
 }
+

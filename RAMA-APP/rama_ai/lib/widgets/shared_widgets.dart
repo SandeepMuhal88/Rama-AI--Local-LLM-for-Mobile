@@ -251,6 +251,8 @@ class SendButton extends StatelessWidget {
 }
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
+/// Fully stateless — no animations, no timers, no setState storms.
+/// Text is always shown in full immediately for zero-jank rendering.
 class MessageBubble extends StatefulWidget {
   final ChatMessage  message;
   final bool         isLast;
@@ -258,6 +260,8 @@ class MessageBubble extends StatefulWidget {
   final String       userAvatarEmoji;
   final Color        accent, card, border, textColor, subColor, dimColor;
   final bool         isDark;
+  // isStreaming kept for API compatibility but unused (animations removed)
+  final bool         isStreaming;
 
   const MessageBubble({
     super.key,
@@ -272,34 +276,16 @@ class MessageBubble extends StatefulWidget {
     required this.textColor,
     required this.subColor,
     required this.dimColor,
+    this.isStreaming = false,
   });
 
   @override
   State<MessageBubble> createState() => _MessageBubbleState();
 }
 
-class _MessageBubbleState extends State<MessageBubble>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _anim;
-  late final Animation<double>   _fade;
-  late final Animation<Offset>   _slide;
+class _MessageBubbleState extends State<MessageBubble> {
+  // Only state we track: copy confirmation
   bool _copied = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _anim  = AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
-    _fade  = CurvedAnimation(parent: _anim, curve: Curves.easeOut);
-    _slide = Tween<Offset>(begin: const Offset(0, 0.06), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic));
-    _anim.forward();
-  }
-
-  @override
-  void dispose() {
-    _anim.dispose();
-    super.dispose();
-  }
 
   Future<void> _copy() async {
     await Clipboard.setData(ClipboardData(text: widget.message.text));
@@ -310,165 +296,191 @@ class _MessageBubbleState extends State<MessageBubble>
 
   @override
   Widget build(BuildContext context) {
-    final MessageRole role    = widget.message.role;
-    final String      text    = widget.message.text;
-    final DateTime    time    = widget.message.time;
+    final MessageRole role = widget.message.role;
+    final String      text = widget.message.text;
+    final DateTime    time = widget.message.time;
 
     final isUser  = role == MessageRole.user;
     final isError = role == MessageRole.error;
 
-    final width  = MediaQuery.of(context).size.width;
-    final accent = widget.accent;
-    final isDark = widget.isDark;
+    final screenW = MediaQuery.of(context).size.width;
+    final accent  = widget.accent;
+    final isDark  = widget.isDark;
 
     final userBubbleGrad = LinearGradient(
       colors: [accent, accent.withValues(alpha: 0.72)],
       begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
+      end:   Alignment.bottomRight,
     );
-    final aiBubbleBg = isDark ? widget.card : const Color(0xFFF7F7FF);
+    final aiBubbleBg = isDark ? widget.card : const Color(0xFFF5F5FF);
 
-    return FadeTransition(
-      opacity: _fade,
-      child: SlideTransition(
-        position: _slide,
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 18),
-          child: Row(
-            mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (!isUser) ...[
-                LogoBadge(size: 30, accent: accent),
-                const SizedBox(width: 8),
-              ],
-              Flexible(
-                child: Column(
-                  crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                  children: [
-                    // Sender label
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 5, left: 4, right: 4),
-                      child: Text(
-                        isUser ? widget.userName : isError ? 'Error' : 'Rama AI',
-                        style: TextStyle(
-                          color: isError ? RamaColors.error : isUser ? accent : widget.subColor,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
+    final textStyle = TextStyle(
+      color: isUser
+          ? Colors.white
+          : isError
+              ? RamaColors.error
+              : widget.textColor,
+      fontSize:      15.5,
+      height:        1.70,
+      letterSpacing: 0.1,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Row(
+        mainAxisAlignment:
+            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── AI avatar ──────────────────────────────────────────────────────
+          if (!isUser) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: LogoBadge(size: 32, accent: accent),
+            ),
+            const SizedBox(width: 10),
+          ],
+
+          // ── Bubble column ──────────────────────────────────────────────────
+          Flexible(
+            child: Column(
+              crossAxisAlignment:
+                  isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              children: [
+                // Sender label
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 5, left: 2, right: 2),
+                  child: Text(
+                    isUser
+                        ? widget.userName
+                        : isError
+                            ? '⚠ Error'
+                            : 'Rama AI',
+                    style: TextStyle(
+                      color: isError
+                          ? RamaColors.error
+                          : isUser
+                              ? accent
+                              : widget.subColor,
+                      fontSize:   12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
                     ),
-                    // Bubble
-                    Container(
-                      constraints: BoxConstraints(maxWidth: width * 0.80),
-                      decoration: BoxDecoration(
-                        gradient: isUser ? userBubbleGrad : null,
+                  ),
+                ),
+
+                // ── Bubble ───────────────────────────────────────────────────
+                Container(
+                  constraints: BoxConstraints(maxWidth: screenW * 0.82),
+                  decoration: BoxDecoration(
+                    gradient: isUser ? userBubbleGrad : null,
+                    color: isUser
+                        ? null
+                        : isError
+                            ? (isDark
+                                ? const Color(0xFF2A1010)
+                                : const Color(0xFFFFECEC))
+                            : aiBubbleBg,
+                    borderRadius: BorderRadius.only(
+                      topLeft:     const Radius.circular(20),
+                      topRight:    const Radius.circular(20),
+                      bottomLeft:  Radius.circular(isUser ? 20 : 4),
+                      bottomRight: Radius.circular(isUser ? 4 : 20),
+                    ),
+                    border: isUser
+                        ? null
+                        : Border.all(
+                            color: isError
+                                ? RamaColors.error.withValues(alpha: 0.4)
+                                : widget.border,
+                          ),
+                    boxShadow: [
+                      BoxShadow(
                         color: isUser
-                            ? null
-                            : isError
-                                ? (isDark ? const Color(0xFF2A1010) : const Color(0xFFFFECEC))
-                                : aiBubbleBg,
-                        borderRadius: BorderRadius.only(
-                          topLeft:     const Radius.circular(18),
-                          topRight:    const Radius.circular(18),
-                          bottomLeft:  Radius.circular(isUser ? 18 : 4),
-                          bottomRight: Radius.circular(isUser ? 4 : 18),
-                        ),
-                        border: isUser
-                            ? null
-                            : Border.all(
-                                color: isError
-                                    ? RamaColors.error.withValues(alpha: 0.4)
-                                    : widget.border,
-                              ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: isUser
-                                ? accent.withValues(alpha: 0.25)
-                                : Colors.black.withValues(alpha: isDark ? 0.2 : 0.07),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
+                            ? accent.withValues(alpha: 0.22)
+                            : Colors.black.withValues(
+                                alpha: isDark ? 0.15 : 0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
                       ),
-                      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
-                      child: SelectableText(
-                        text,
+                    ],
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 13),
+                  // SelectableText so user can copy-select parts of the reply
+                  child: SelectableText(text, style: textStyle),
+                ),
+
+                // ── Timestamp + copy button ───────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.only(top: 5, left: 2, right: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _fmtTime(time),
                         style: TextStyle(
-                          color: isUser
-                              ? Colors.white
-                              : isError
-                                  ? RamaColors.error
-                                  : widget.textColor,
-                          fontSize: 14.5,
-                          height: 1.6,
-                          letterSpacing: 0.1,
-                        ),
+                            color: widget.dimColor, fontSize: 10.5),
                       ),
-                    ),
-                    // Timestamp + copy
-                    Padding(
-                      padding: const EdgeInsets.only(top: 5, left: 4, right: 4),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _fmtTime(time),
-                            style: TextStyle(color: widget.dimColor, fontSize: 10),
-                          ),
-                          if (!isUser) ...[
-                            const SizedBox(width: 8),
-                            GestureDetector(
-                              onTap: _copy,
-                              child: AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 200),
-                                child: Row(
-                                  key: ValueKey(_copied),
-                                  children: [
-                                    Icon(
-                                      _copied ? Icons.check_rounded : Icons.copy_rounded,
-                                      color: _copied ? const Color(0xFF4CAF50) : widget.dimColor,
-                                      size: 12,
-                                    ),
-                                    const SizedBox(width: 3),
-                                    Text(
-                                      _copied ? 'Copied!' : 'Copy',
-                                      style: TextStyle(
-                                        color: _copied ? const Color(0xFF4CAF50) : widget.dimColor,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
+                      if (!isUser && !isError) ...[
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: _copy,
+                          child: Row(
+                            children: [
+                              Icon(
+                                _copied
+                                    ? Icons.check_rounded
+                                    : Icons.copy_rounded,
+                                color: _copied
+                                    ? const Color(0xFF4CAF50)
+                                    : widget.dimColor,
+                                size: 12,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                _copied ? 'Copied!' : 'Copy',
+                                style: TextStyle(
+                                  color: _copied
+                                      ? const Color(0xFF4CAF50)
+                                      : widget.dimColor,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // User avatar
-              if (isUser) ...[
-                const SizedBox(width: 8),
-                Container(
-                  width: 30, height: 30,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: accent.withValues(alpha: 0.4)),
-                  ),
-                  child: Center(
-                    child: Text(widget.userAvatarEmoji, style: const TextStyle(fontSize: 15)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ],
-            ],
+            ),
           ),
-        ),
+
+          // ── User avatar ────────────────────────────────────────────────────
+          if (isUser) ...[
+            const SizedBox(width: 10),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: accent.withValues(alpha: 0.4)),
+                ),
+                child: Center(
+                  child: Text(
+                    widget.userAvatarEmoji,
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -476,3 +488,4 @@ class _MessageBubbleState extends State<MessageBubble>
   static String _fmtTime(DateTime t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 }
+

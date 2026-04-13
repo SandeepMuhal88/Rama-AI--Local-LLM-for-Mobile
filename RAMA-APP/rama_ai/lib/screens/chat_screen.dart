@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -13,12 +12,10 @@ import '../widgets/shared_widgets.dart';
 import 'profile_setup_screen.dart';
 import 'model_manager_screen.dart';
 
-// ─── Isolate helper ───────────────────────────────────────────────────────────
-Future<String> runInferenceIsolate(List<String> args) async {
-  final svc = LLMService();
-  final raw  = await svc.run(args[0], args[1]);
-  return cleanLLMResponse(raw);
-}
+// NOTE: compute() / background isolates are intentionally NOT used here.
+// FFI (libllama_lib.so) must be called from the root isolate on Android;
+// using compute() causes a native crash on the second call.  Instead we
+// schedule the blocking FFI call on the platform thread pool via Future.
 
 // ─── Chat Screen ──────────────────────────────────────────────────────────────
 class ChatScreen extends StatefulWidget {
@@ -237,11 +234,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     final contextMsgs = await ChatStorage.lastMessages(_currentConvId!, 8);
     final prompt      = _buildContextPrompt(contextMsgs, text);
 
-    final String modelPath  = _activeModelPath!;
+    final String modelPath = _activeModelPath!;
     final String reply;
 
     try {
-      reply = await compute(runInferenceIsolate, [modelPath, prompt]);
+      // Run the blocking FFI call safely in a dedicated Isolate.
+      // LLMService.runInference() handles isolate lifecycle and the
+      // re-entrant guard (_busy flag) to prevent the second-message crash.
+      final raw = await LLMService.runInference(modelPath, prompt);
+      reply = cleanLLMResponse(raw);
     } catch (e) {
       final errMsg = ChatMessage(MessageRole.error, 'Error: $e');
       if (mounted) {
@@ -904,19 +905,30 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       controller: _scroll,
       padding:    const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
       itemCount:  _messages.length,
-      itemBuilder: (ctx, i) => MessageBubble(
-        message:         _messages[i],
-        isLast:          i == _messages.length - 1,
-        userName:        _userName,
-        userAvatarEmoji: _kAvatarEmojis[_userAvatar.clamp(0, _kAvatarEmojis.length - 1)],
-        accent:          _accent,
-        isDark:          appTheme.isDark,
-        card:            _card,
-        border:          _border,
-        textColor:       _text,
-        subColor:        _sub,
-        dimColor:        _dim,
-      ),
+      itemBuilder: (ctx, i) {
+        final msg    = _messages[i];
+        final isLast = i == _messages.length - 1;
+        // Play typewriter animation only on the latest AI reply while
+        // the model is NOT still thinking (i.e. the reply just arrived).
+        final isStreaming = isLast &&
+            msg.role == MessageRole.ai &&
+            !_thinking;
+        return MessageBubble(
+          key:             ValueKey('${msg.time.millisecondsSinceEpoch}_$i'),
+          message:         msg,
+          isLast:          isLast,
+          isStreaming:     isStreaming,
+          userName:        _userName,
+          userAvatarEmoji: _kAvatarEmojis[_userAvatar.clamp(0, _kAvatarEmojis.length - 1)],
+          accent:          _accent,
+          isDark:          appTheme.isDark,
+          card:            _card,
+          border:          _border,
+          textColor:       _text,
+          subColor:        _sub,
+          dimColor:        _dim,
+        );
+      },
     );
   }
 
