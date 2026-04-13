@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -10,7 +11,7 @@ class ModelInfo {
   final String name;
   final String description;
   final String size;
-  final String huggingFaceUrl;
+  final String downloadUrl;
   final String filename;
   final Color  accentColor;
   final String params;
@@ -20,7 +21,7 @@ class ModelInfo {
     required this.name,
     required this.description,
     required this.size,
-    required this.huggingFaceUrl,
+    required this.downloadUrl,
     required this.filename,
     required this.accentColor,
     required this.params,
@@ -28,64 +29,61 @@ class ModelInfo {
   });
 }
 
-// ─── Model catalogue (with verified HuggingFace file names) ──────────────────
+// ─── Catalogue ────────────────────────────────────────────────────────────────
 const List<ModelInfo> kAvailableModels = [
   ModelInfo(
-    name: 'Phi-3 Mini 4K (Instruct)',
-    description: "Microsoft's 3.8B instruct model. Excellent for chat & coding tasks.",
-    size: '2.39 GB',
-    params: '3.8B',
-    huggingFaceUrl:
-        'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
-    filename: 'Phi-3-mini-4k-instruct-q4.gguf',
-    accentColor: Color(0xFF7C6EF5),
-    badge: 'Popular',
-  ),
-  ModelInfo(
-    name: 'Gemma 4 E2B (Instruct)',
-    description: "Google's Gemma 4 2B – multimodal, efficient & fast on-device.",
-    size: '3.11 GB',
-    params: '2B',
-    huggingFaceUrl:
-        'https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf',
-    filename: 'gemma-4-E2B-it-Q4_K_M.gguf',
-    accentColor: Color(0xFF4DB6AC),
-    badge: 'New',
-  ),
-  ModelInfo(
-    name: 'Phi-2 (2.7B)',
-    description: "Microsoft Phi-2 — punches above its weight for reasoning & code.",
-    size: '1.79 GB',
-    params: '2.7B',
-    huggingFaceUrl:
-        'https://huggingface.co/TheBloke/phi-2-GGUF/resolve/main/phi-2.Q4_K_M.gguf',
-    filename: 'phi-2.Q4_K_M.gguf',
-    accentColor: Color(0xFF26C6DA),
-    badge: 'Balanced',
-  ),
-  ModelInfo(
-    name: 'Gemma 1.1 7B (Instruct)',
-    description: "Google Gemma 7B — high-quality answers. Requires HF account login.",
-    size: '34.2 GB',
-    params: '7B',
-    huggingFaceUrl:
-        'https://huggingface.co/google/gemma-1.1-7b-it-GGUF/tree/main',
-    filename: '7b_it_v1p1.gguf',
-    accentColor: Color(0xFFAB47BC),
-    badge: 'High Quality',
-  ),
-  ModelInfo(
-    name: 'Gemma 4 E2B (Compact Q3)',
-    description: "Even smaller Gemma 4 2B at Q3 — for low-RAM devices.",
-    size: '2.54 GB',
-    params: '2B',
-    huggingFaceUrl:
-        'https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q3_K_M.gguf',
-    filename: 'gemma-4-E2B-it-Q3_K_M.gguf',
+    name:        'TinyLlama 1.1B Chat',
+    description: 'Tiny but capable! Great for low-RAM devices. Very fast.',
+    size:        '0.67 GB',
+    params:      '1.1B',
+    downloadUrl: 'https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF'
+                 '/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
+    filename:    'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf',
     accentColor: Color(0xFF66BB6A),
-    badge: 'Smallest',
+    badge:       'Smallest',
+  ),
+  ModelInfo(
+    name:        'Phi-2 (2.7B)',
+    description: 'Microsoft Phi-2 — great reasoning & code in a small package.',
+    size:        '1.79 GB',
+    params:      '2.7B',
+    downloadUrl: 'https://huggingface.co/TheBloke/phi-2-GGUF'
+                 '/resolve/main/phi-2.Q4_K_M.gguf',
+    filename:    'phi-2.Q4_K_M.gguf',
+    accentColor: Color(0xFF26C6DA),
+    badge:       'Balanced',
+  ),
+  ModelInfo(
+    name:        'Gemma 2B Instruct',
+    description: "Google's efficient 2B instruct model. Quality chat responses.",
+    size:        '1.35 GB',
+    params:      '2B',
+    downloadUrl: 'https://huggingface.co/google/gemma-2b-it-GGUF'
+                 '/resolve/main/2b_it_v1p1.gguf',
+    filename:    'gemma-2b-it-q4.gguf',
+    accentColor: Color(0xFF4DB6AC),
+    badge:       'Default',
+  ),
+  ModelInfo(
+    name:        'Phi-3 Mini 4K Instruct',
+    description: "Microsoft's 3.8B chat & coding powerhouse.",
+    size:        '2.39 GB',
+    params:      '3.8B',
+    downloadUrl: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf'
+                 '/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+    filename:    'Phi-3-mini-4k-instruct-q4.gguf',
+    accentColor: Color(0xFF7C6EF5),
+    badge:       'Popular',
   ),
 ];
+
+// ─── Download state per model ─────────────────────────────────────────────────
+class _DownloadState {
+  bool   active   = false;
+  double progress = 0.0;  // 0–1
+  String status   = '';
+  CancelToken? token;
+}
 
 // ─── Model Manager Screen ─────────────────────────────────────────────────────
 class ModelManagerScreen extends StatefulWidget {
@@ -109,9 +107,12 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
   bool _importing = false;
   String _storagePath = '';
 
+  // Download states keyed by filename
+  final Map<String, _DownloadState> _downloads = {};
+
   late final AnimationController _shimmerCtrl;
 
-  // Colour helpers from appTheme
+  // Colour helpers
   Color get _bg      => appTheme.isDark ? RamaColors.darkBg      : RamaColors.lightBg;
   Color get _surface => appTheme.isDark ? RamaColors.darkSurface  : RamaColors.lightSurface;
   Color get _card    => appTheme.isDark ? RamaColors.darkCard     : RamaColors.lightCard;
@@ -129,11 +130,19 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
       duration: const Duration(milliseconds: 1400),
     )..repeat();
     appTheme.addListener(() { if (mounted) setState(() {}); });
+    // Initialise download state map
+    for (final m in kAvailableModels) {
+      _downloads[m.filename] = _DownloadState();
+    }
     _loadAll();
   }
 
   @override
   void dispose() {
+    // Cancel any active downloads on dispose
+    for (final ds in _downloads.values) {
+      ds.token?.cancel('Screen disposed');
+    }
     _shimmerCtrl.dispose();
     super.dispose();
   }
@@ -161,18 +170,93 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
     }
   }
 
+  // ── Download via Dio ──────────────────────────────────────────────────────────
+  Future<void> _downloadModel(ModelInfo info) async {
+    final ds = _downloads[info.filename]!;
+    if (ds.active) return;
+
+    final destPath = await LLMService.modelSavePath(info.filename);
+    final destFile = File(destPath);
+
+    if (destFile.existsSync()) {
+      _snack('Already downloaded!', _accent);
+      return;
+    }
+
+    final token = CancelToken();
+    setState(() {
+      ds.active   = true;
+      ds.progress = 0.0;
+      ds.status   = 'Connecting…';
+      ds.token    = token;
+    });
+
+    try {
+      final dio = Dio();
+      await dio.download(
+        info.downloadUrl,
+        destPath,
+        cancelToken: token,
+        deleteOnError: true,
+        onReceiveProgress: (received, total) {
+          if (!mounted) return;
+          if (total > 0) {
+            setState(() {
+              ds.progress = received / total;
+              final mb    = received / (1024 * 1024);
+              final tMb   = total   / (1024 * 1024);
+              ds.status   = '${mb.toStringAsFixed(0)} / ${tMb.toStringAsFixed(0)} MB';
+            });
+          }
+        },
+      );
+
+      await _loadAll();
+      if (mounted) {
+        _snack('✅ ${info.name} downloaded!', _accent);
+        // Auto-select if no model loaded
+        if (widget.activeModelPath == null) {
+          widget.onModelSelected(destPath);
+          Navigator.pop(context);
+          return;
+        }
+      }
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        // delete partial file
+        if (destFile.existsSync()) destFile.deleteSync();
+        if (mounted) _snack('Download cancelled', Colors.orange);
+      } else {
+        if (mounted) _snack('Download failed: ${e.message}', Colors.red);
+      }
+    } catch (e) {
+      if (mounted) _snack('Error: $e', Colors.red);
+    } finally {
+      if (mounted) {
+        setState(() {
+          ds.active   = false;
+          ds.progress = 0.0;
+          ds.status   = '';
+          ds.token    = null;
+        });
+      }
+    }
+  }
+
+  void _cancelDownload(ModelInfo info) {
+    _downloads[info.filename]?.token?.cancel('User cancelled');
+  }
+
   // ── Browse & import ───────────────────────────────────────────────────────────
   Future<void> _browseAndImport() async {
-    if (Platform.isAndroid) {
-      await Permission.storage.request();
-    }
+    if (Platform.isAndroid) await Permission.storage.request();
     setState(() => _importing = true);
     try {
       final result = await FilePicker.platform.pickFiles(
-        type: FileType.any,
+        type:        FileType.any,
         allowMultiple: false,
         dialogTitle: 'Select a .gguf model file',
-        withData: false, withReadStream: false,
+        withData:    false, withReadStream: false,
       );
       if (result == null || result.files.isEmpty) {
         setState(() => _importing = false);
@@ -198,7 +282,7 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
 
       await _loadAll();
       if (mounted) {
-        _snack('✅  "$filename" imported!', _accent);
+        _snack('✅ "$filename" imported!', _accent);
         if (widget.activeModelPath == null) {
           widget.onModelSelected(destPath);
           Navigator.pop(context);
@@ -260,24 +344,20 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
               Text(name, style: TextStyle(color: _sub, fontSize: 13)),
               const SizedBox(height: 6),
               Text('This will permanently remove the file from app storage.',
-                  style: TextStyle(
-                      color: _dim, fontSize: 12, height: 1.4)),
+                  style: TextStyle(color: _dim, fontSize: 12, height: 1.4)),
               const SizedBox(height: 20),
               Row(
                 children: [
                   Expanded(
                     child: _OutlineBtn(
-                      label: 'Cancel',
-                      color: _sub,
-                      border: _border,
+                      label: 'Cancel', color: _sub, border: _border,
                       onTap: () => Navigator.pop(ctx, false),
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _FilledBtn(
-                      label: 'Delete',
-                      color: Colors.red,
+                      label: 'Delete', color: Colors.red,
                       onTap: () => Navigator.pop(ctx, true),
                     ),
                   ),
@@ -297,11 +377,11 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
   void _snack(String msg, Color bg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(msg, style: const TextStyle(color: Colors.white)),
-        backgroundColor: bg,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.all(12),
+        content:          Text(msg, style: const TextStyle(color: Colors.white)),
+        backgroundColor:  bg,
+        behavior:         SnackBarBehavior.floating,
+        shape:            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin:           const EdgeInsets.all(12),
       ),
     );
   }
@@ -320,16 +400,17 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
               child: _loading
                   ? Center(child: CircularProgressIndicator(color: _accent))
                   : RefreshIndicator(
-                      color: _accent,
+                      color:           _accent,
                       backgroundColor: _card,
-                      onRefresh: _loadAll,
+                      onRefresh:       _loadAll,
                       child: ListView(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
                         children: [
                           _buildImportSection(),
                           const SizedBox(height: 24),
+
                           _SectionTitle(
-                            label: 'LOADED MODELS',
+                            label:    'DOWNLOADED MODELS',
                             trailing: '${_localModels.length} file(s)',
                             textColor: _sub, dimColor: _dim,
                           ),
@@ -338,28 +419,31 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
                             _buildNoModels()
                           else
                             ..._localModels.map(_localModelCard),
+
                           const SizedBox(height: 24),
                           _SectionTitle(
-                            label: 'STORAGE LOCATION',
+                            label:    'STORAGE LOCATION',
                             textColor: _sub, dimColor: _dim,
                           ),
                           const SizedBox(height: 10),
                           _buildStorageCard(),
+
                           const SizedBox(height: 24),
                           _SectionTitle(
-                            label: 'HOW TO GET MODELS',
-                            textColor: _sub, dimColor: _dim,
-                          ),
-                          const SizedBox(height: 10),
-                          _buildHowToCard(),
-                          const SizedBox(height: 24),
-                          _SectionTitle(
-                            label: 'RECOMMENDED MODELS',
+                            label:    'DOWNLOAD MODELS',
                             trailing: 'via HuggingFace',
                             textColor: _sub, dimColor: _dim,
                           ),
                           const SizedBox(height: 10),
                           ...kAvailableModels.map(_catalogueCard),
+
+                          const SizedBox(height: 24),
+                          _SectionTitle(
+                            label:    'HOW TO GET MODELS',
+                            textColor: _sub, dimColor: _dim,
+                          ),
+                          const SizedBox(height: 10),
+                          _buildHowToCard(),
                         ],
                       ),
                     ),
@@ -373,7 +457,7 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
   // ── Header ────────────────────────────────────────────────────────────────────
   Widget _buildHeader() => Container(
         decoration: BoxDecoration(
-          color: _surface,
+          color:  _surface,
           border: Border(bottom: BorderSide(color: _border)),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -384,9 +468,9 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
               child: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: _card,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: _border),
+                  color:         _card,
+                  borderRadius:  BorderRadius.circular(10),
+                  border:        Border.all(color: _border),
                 ),
                 child: Icon(Icons.arrow_back_ios_new_rounded,
                     color: _sub, size: 16),
@@ -398,10 +482,8 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
               children: [
                 Text('Model Manager',
                     style: TextStyle(
-                        color: _text,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 17)),
-                Text('Manage your on-device AI models',
+                        color: _text, fontWeight: FontWeight.w800, fontSize: 17)),
+                Text('Download & manage on-device models',
                     style: TextStyle(color: _sub, fontSize: 11)),
               ],
             ),
@@ -411,9 +493,9 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
               child: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: _accent.withValues(alpha: 0.1),
+                  color:        _accent.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: _accent.withValues(alpha: 0.3)),
+                  border:       Border.all(color: _accent.withValues(alpha: 0.30)),
                 ),
                 child: Icon(Icons.refresh_rounded, color: _accent, size: 18),
               ),
@@ -426,31 +508,32 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
   Widget _buildImportSection() => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionTitle(label: 'IMPORT FROM DEVICE', textColor: _sub, dimColor: _dim),
+          _SectionTitle(
+              label: 'IMPORT FROM DEVICE', textColor: _sub, dimColor: _dim),
           const SizedBox(height: 10),
           GestureDetector(
             onTap: _importing ? null : _browseAndImport,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 18),
+              padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 18),
               decoration: BoxDecoration(
                 gradient: _importing
                     ? null
                     : LinearGradient(
                         colors: [_accent, _accent.withValues(alpha: 0.75)],
                         begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
+                        end:   Alignment.bottomRight,
                       ),
-                color: _importing ? _card : null,
+                color:        _importing ? _card : null,
                 borderRadius: BorderRadius.circular(18),
-                border: _importing ? Border.all(color: _border) : null,
+                border:       _importing ? Border.all(color: _border) : null,
                 boxShadow: _importing
                     ? []
                     : [
                         BoxShadow(
-                          color: _accent.withValues(alpha: 0.35),
+                          color:      _accent.withValues(alpha: 0.35),
                           blurRadius: 20,
-                          offset: const Offset(0, 8),
+                          offset:     const Offset(0, 8),
                         ),
                       ],
               ),
@@ -471,9 +554,9 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
                         ? 'Importing model…'
                         : 'Browse & Load Model (.gguf)',
                     style: TextStyle(
-                      color: _importing ? _sub : Colors.white,
+                      color:      _importing ? _sub : Colors.white,
                       fontWeight: FontWeight.w700,
-                      fontSize: 15,
+                      fontSize:   15,
                     ),
                   ),
                 ],
@@ -487,16 +570,16 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
   Widget _buildNoModels() => Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: _card,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _border),
+          color:         _card,
+          borderRadius:  BorderRadius.circular(16),
+          border:        Border.all(color: _border),
         ),
         child: Column(
           children: [
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: _accent.withValues(alpha: 0.1),
+                color: _accent.withValues(alpha: 0.10),
                 shape: BoxShape.circle,
               ),
               child: Icon(Icons.inbox_rounded, color: _accent, size: 32),
@@ -506,7 +589,8 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
                 style: TextStyle(
                     color: _text, fontWeight: FontWeight.w700, fontSize: 15)),
             const SizedBox(height: 6),
-            Text('Tap "Browse & Load" above to select a\n.gguf file from your device.',
+            Text(
+                'Download a model below or\ntap "Browse & Load" to import one.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: _sub, fontSize: 12.5, height: 1.5)),
           ],
@@ -521,12 +605,12 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
     final sizeStr   = sizeMB >= 1024
         ? '${(sizeMB / 1024).toStringAsFixed(2)} GB'
         : '${sizeMB.toStringAsFixed(0)} MB';
-    final isActive = widget.activeModelPath == f.path;
+    final isActive  = widget.activeModelPath == f.path;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: _card,
+        color:  _card,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isActive ? _accent.withValues(alpha: 0.6) : _border,
@@ -556,14 +640,14 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: isActive
-                          ? _accent.withValues(alpha: 0.4)
+                          ? _accent.withValues(alpha: 0.40)
                           : _border,
                     ),
                   ),
                   child: Icon(
                     isActive ? Icons.check_circle_rounded : Icons.storage_rounded,
                     color: isActive ? _accent : _sub,
-                    size: 22,
+                    size:  22,
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -573,9 +657,9 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
                     children: [
                       Text(name,
                           style: TextStyle(
-                            color: _text,
+                            color:      _text,
                             fontWeight: FontWeight.w600,
-                            fontSize: 13,
+                            fontSize:   13,
                           ),
                           overflow: TextOverflow.ellipsis),
                       const SizedBox(height: 3),
@@ -591,14 +675,14 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: _accent.withValues(alpha: 0.16),
-                                borderRadius: BorderRadius.circular(6),
+                                color:         _accent.withValues(alpha: 0.16),
+                                borderRadius:  BorderRadius.circular(6),
                               ),
                               child: Text('ACTIVE',
                                   style: TextStyle(
-                                    color: _accent,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w800,
+                                    color:         _accent,
+                                    fontSize:      9,
+                                    fontWeight:    FontWeight.w800,
                                     letterSpacing: 0.8,
                                   )),
                             ),
@@ -616,15 +700,15 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 7),
                         decoration: BoxDecoration(
-                          color: _accent.withValues(alpha: 0.15),
+                          color:        _accent.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
+                          border:       Border.all(
                               color: _accent.withValues(alpha: 0.35)),
                         ),
                         child: Text('Use',
                             style: TextStyle(
-                              color: _accent,
-                              fontSize: 12,
+                              color:      _accent,
+                              fontSize:   12,
                               fontWeight: FontWeight.w700,
                             )),
                       ),
@@ -634,9 +718,9 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
                       child: Container(
                         padding: const EdgeInsets.all(7),
                         decoration: BoxDecoration(
-                          color: Colors.red.withValues(alpha: 0.1),
+                          color:        Colors.red.withValues(alpha: 0.10),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
+                          border:       Border.all(
                               color: Colors.red.withValues(alpha: 0.25)),
                         ),
                         child: const Icon(Icons.delete_outline_rounded,
@@ -653,13 +737,201 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
     );
   }
 
+  // ── Catalogue card (with download progress) ───────────────────────────────────
+  Widget _catalogueCard(ModelInfo m) {
+    final local    = _matchLocal(m);
+    final isActive = local != null && widget.activeModelPath == local.path;
+    final ds       = _downloads[m.filename]!;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color:         _card,
+        borderRadius:  BorderRadius.circular(18),
+        border: Border.all(
+          color: isActive
+              ? m.accentColor.withValues(alpha: 0.55)
+              : _border,
+          width: isActive ? 1.5 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color:      Colors.black.withValues(alpha: appTheme.isDark ? 0.22 : 0.06),
+            blurRadius: 12,
+            offset:     const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header row
+            Row(
+              children: [
+                Container(
+                  width: 48, height: 48,
+                  decoration: BoxDecoration(
+                    color:        m.accentColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(14),
+                    border:       Border.all(
+                        color: m.accentColor.withValues(alpha: 0.35)),
+                  ),
+                  child: Icon(Icons.memory_rounded,
+                      color: m.accentColor, size: 24),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(m.name,
+                                style: TextStyle(
+                                  color:      _text,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize:   14,
+                                )),
+                          ),
+                          if (m.badge.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: m.accentColor.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(m.badge,
+                                  style: TextStyle(
+                                    color:      m.accentColor,
+                                    fontSize:   10,
+                                    fontWeight: FontWeight.w700,
+                                  )),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          Icon(Icons.data_usage_rounded,
+                              color: _dim, size: 12),
+                          const SizedBox(width: 4),
+                          Text('${m.params}  •  ${m.size}',
+                              style: TextStyle(color: _sub, fontSize: 11)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 10),
+
+            // Description
+            Text(m.description,
+                style: TextStyle(color: _sub, fontSize: 12.5, height: 1.5)),
+
+            const SizedBox(height: 14),
+
+            // Download progress bar (only when downloading)
+            if (ds.active) ...[
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Downloading…  ${ds.status}',
+                          style: TextStyle(color: _sub, fontSize: 11)),
+                      Text('${(ds.progress * 100).toStringAsFixed(1)}%',
+                          style: TextStyle(
+                            color:      m.accentColor,
+                            fontSize:   11,
+                            fontWeight: FontWeight.w700,
+                          )),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value:            ds.progress,
+                      minHeight:        6,
+                      backgroundColor:  _border,
+                      valueColor:       AlwaysStoppedAnimation(m.accentColor),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+              ),
+            ],
+
+            // Action buttons row
+            Row(
+              children: [
+                // Status / use button
+                Expanded(
+                  child: local != null
+                      ? (isActive
+                          ? _badgeChip('✓ Active', m.accentColor)
+                          : _OutlineBtn(
+                              label: 'Use This Model',
+                              color: m.accentColor,
+                              border: m.accentColor.withValues(alpha: 0.4),
+                              onTap: () {
+                                widget.onModelSelected(local.path);
+                                Navigator.pop(context);
+                              },
+                            ))
+                      : (ds.active
+                          ? _OutlineBtn(
+                              label: 'Cancel',
+                              color: Colors.red,
+                              border: Colors.red.withValues(alpha: 0.4),
+                              onTap: () => _cancelDownload(m),
+                            )
+                          : _FilledBtn(
+                              label: '⬇  Download  (${m.size})',
+                              color: m.accentColor,
+                              onTap: () => _downloadModel(m),
+                            )),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _badgeChip(String label, Color color) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        decoration: BoxDecoration(
+          color:        color.withValues(alpha: 0.13),
+          borderRadius: BorderRadius.circular(12),
+          border:       Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: Center(
+          child: Text(label,
+              style: TextStyle(
+                color:      color,
+                fontWeight: FontWeight.w700,
+                fontSize:   13,
+              )),
+        ),
+      );
+
   // ── Storage info card ─────────────────────────────────────────────────────────
   Widget _buildStorageCard() => Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: _card,
+          color:        _card,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: _border),
+          border:       Border.all(color: _border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -677,8 +949,10 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
             SelectableText(
               _storagePath.isEmpty ? '…' : _storagePath,
               style: TextStyle(
-                color: _sub, fontSize: 11,
-                fontFamily: 'monospace', height: 1.5,
+                color:      _sub,
+                fontSize:   11,
+                fontFamily: 'monospace',
+                height:     1.5,
               ),
             ),
             const SizedBox(height: 10),
@@ -693,41 +967,41 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
         ),
       );
 
-  // ── How to card ───────────────────────────────────────────────────────────────
+  // ── How-to card ───────────────────────────────────────────────────────────────
   Widget _buildHowToCard() => Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: _card,
+          color:        _card,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _accent.withValues(alpha: 0.25)),
+          border:       Border.all(color: _accent.withValues(alpha: 0.25)),
         ),
         child: Column(
           children: [
             _howStep(
               number: '01',
-              icon: Icons.folder_open_rounded,
-              title: 'Browse from device (Easiest)',
-              detail:
-                  'Tap "Browse & Load" above, select any .gguf file from your Downloads or any folder on your phone.',
-              color: _accent,
+              icon:   Icons.download_rounded,
+              title:  'Download in-app (Easiest)',
+              detail: 'Tap the ⬇ Download button on any model card above. '
+                      'Progress is shown in real-time.',
+              color:  _accent,
             ),
             _divider(),
             _howStep(
               number: '02',
-              icon: Icons.computer_rounded,
-              title: 'Copy via USB / PC',
-              detail:
-                  'Connect phone → paste .gguf into:\nAndroid › data › com.example.rama_ai › files › RAMA_AI › models',
-              color: const Color(0xFF4DB6AC),
+              icon:   Icons.folder_open_rounded,
+              title:  'Browse from device',
+              detail: 'Tap "Browse & Load" to select any .gguf file '
+                      'already on your phone.',
+              color:  const Color(0xFF4DB6AC),
             ),
             _divider(),
             _howStep(
               number: '03',
-              icon: Icons.open_in_browser_rounded,
-              title: 'Download on-device (Chrome)',
-              detail:
-                  'Open HuggingFace.co in Chrome, download a GGUF, then use "Browse & Load" to select it.',
-              color: const Color(0xFFF57C00),
+              icon:   Icons.computer_rounded,
+              title:  'Copy via USB / PC',
+              detail: 'Paste .gguf into:\n'
+                      'Android › data › com.example.rama_ai › files › RAMA_AI › models',
+              color:  const Color(0xFFF57C00),
             ),
           ],
         ),
@@ -752,17 +1026,15 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
             width: 28, height: 28,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.14),
+              color:        color.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Text(
-              number,
-              style: TextStyle(
-                color: color,
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
+            child: Text(number,
+                style: TextStyle(
+                  color:      color,
+                  fontSize:   11,
+                  fontWeight: FontWeight.w800,
+                )),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -776,261 +1048,62 @@ class _ModelManagerScreenState extends State<ModelManagerScreen>
                     Expanded(
                       child: Text(title,
                           style: TextStyle(
-                            color: _text,
+                            color:      _text,
                             fontWeight: FontWeight.w600,
-                            fontSize: 13,
+                            fontSize:   13,
                           )),
                     ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Text(detail,
-                    style: TextStyle(color: _sub, fontSize: 11.5, height: 1.5)),
+                    style: TextStyle(
+                        color: _sub, fontSize: 11.5, height: 1.5)),
               ],
             ),
           ),
         ],
       );
-
-  // ── Catalogue card ────────────────────────────────────────────────────────────
-  Widget _catalogueCard(ModelInfo m) {
-    final local    = _matchLocal(m);
-    final isActive = local != null && widget.activeModelPath == local.path;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: isActive ? m.accentColor.withValues(alpha: 0.55) : _border,
-          width: isActive ? 1.5 : 1,
-        ),
-        boxShadow: isActive
-            ? [
-                BoxShadow(
-                  color: m.accentColor.withValues(alpha: 0.15),
-                  blurRadius: 14,
-                  offset: const Offset(0, 6),
-                ),
-              ]
-            : [],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header row
-            Row(
-              children: [
-                Container(
-                  width: 42, height: 42,
-                  decoration: BoxDecoration(
-                    color: m.accentColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(Icons.memory_rounded,
-                      color: m.accentColor, size: 22),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(m.name,
-                                style: TextStyle(
-                                  color: _text,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 14,
-                                )),
-                          ),
-                          if (m.badge.isNotEmpty) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: m.accentColor.withValues(alpha: 0.18),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(m.badge,
-                                  style: TextStyle(
-                                    color: m.accentColor,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 0.7,
-                                  )),
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Text(m.params,
-                              style: TextStyle(
-                                  color: m.accentColor,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 11)),
-                          Text(' · ${m.size}',
-                              style:
-                                  TextStyle(color: _sub, fontSize: 11)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(m.description,
-                style: TextStyle(color: _sub, fontSize: 12.5, height: 1.45)),
-            const SizedBox(height: 12),
-            // Status + action row
-            Row(
-              children: [
-                if (local != null) ...[
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF4CAF50).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.check_circle_rounded,
-                            color: Color(0xFF4CAF50), size: 12),
-                        const SizedBox(width: 4),
-                        const Text('Downloaded',
-                            style: TextStyle(
-                              color: Color(0xFF4CAF50),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            )),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                ] else ...[
-                  Expanded(
-                    child: Text(
-                      'Download from HuggingFace, then import:',
-                      style: TextStyle(color: _dim, fontSize: 11),
-                    ),
-                  ),
-                ],
-                const Spacer(),
-                if (local != null && !isActive)
-                  GestureDetector(
-                    onTap: () {
-                      widget.onModelSelected(local.path);
-                      Navigator.pop(context);
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: _accent.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                            color: _accent.withValues(alpha: 0.35)),
-                      ),
-                      child: Text('Use',
-                          style: TextStyle(
-                            color: _accent,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          )),
-                    ),
-                  )
-                else if (isActive)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: _accent.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text('Active',
-                        style: TextStyle(
-                          color: _accent,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        )),
-                  ),
-              ],
-            ),
-            // Filename hint for downloading
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: _surface,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _border),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.file_copy_outlined, color: _dim, size: 13),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      m.filename,
-                      style: TextStyle(
-                        color: _sub,
-                        fontSize: 11,
-                        fontFamily: 'monospace',
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
-// ─── Reusable internal widgets ────────────────────────────────────────────────
-class _SectionTitle extends StatelessWidget {
-  final String  label;
-  final String  trailing;
-  final Color   textColor;
-  final Color   dimColor;
+// ─── Helper button widgets ─────────────────────────────────────────────────────
+class _FilledBtn extends StatelessWidget {
+  final String       label;
+  final Color        color;
+  final VoidCallback onTap;
 
-  const _SectionTitle({
-    required this.label,
-    this.trailing = '',
-    required this.textColor,
-    required this.dimColor,
-  });
+  const _FilledBtn({required this.label, required this.color, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Text(label,
-            style: TextStyle(
-              color: textColor,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.4,
-            )),
-        if (trailing.isNotEmpty) ...[
-          const Spacer(),
-          Text(trailing,
-              style: TextStyle(color: dimColor, fontSize: 10)),
-        ],
-      ],
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [color, color.withValues(alpha: 0.75)],
+            begin: Alignment.topLeft,
+            end:   Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color:      color.withValues(alpha: 0.35),
+              blurRadius: 12,
+              offset:     const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Center(
+          child: Text(label,
+              style: const TextStyle(
+                color:      Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize:   13,
+              )),
+        ),
+      ),
     );
   }
 }
@@ -1053,46 +1126,54 @@ class _OutlineBtn extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 44,
-        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
+          color:        color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: border),
+          border:       Border.all(color: border),
         ),
-        child: Text(label,
-            style: TextStyle(
-                color: color, fontWeight: FontWeight.w600, fontSize: 14)),
+        child: Center(
+          child: Text(label,
+              style: TextStyle(
+                color:      color,
+                fontWeight: FontWeight.w700,
+                fontSize:   13,
+              )),
+        ),
       ),
     );
   }
 }
 
-class _FilledBtn extends StatelessWidget {
-  final String       label;
-  final Color        color;
-  final VoidCallback onTap;
+class _SectionTitle extends StatelessWidget {
+  final String  label;
+  final String? trailing;
+  final Color   textColor;
+  final Color   dimColor;
 
-  const _FilledBtn({
+  const _SectionTitle({
     required this.label,
-    required this.color,
-    required this.onTap,
+    this.trailing,
+    required this.textColor,
+    required this.dimColor,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 44,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(label,
-            style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14)),
-      ),
+    return Row(
+      children: [
+        Text(label,
+            style: TextStyle(
+              color:         textColor,
+              fontSize:      10.5,
+              fontWeight:    FontWeight.w800,
+              letterSpacing: 1.2,
+            )),
+        const Spacer(),
+        if (trailing != null)
+          Text(trailing!,
+              style: TextStyle(color: dimColor, fontSize: 10.5)),
+      ],
     );
   }
 }
