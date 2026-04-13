@@ -9,41 +9,36 @@ typedef _RunModelNative = Pointer<Utf8> Function(
 typedef _RunModelDart = Pointer<Utf8> Function(
     Pointer<Utf8> modelPath, Pointer<Utf8> prompt);
 
-// ─── LLMService ───────────────────────────────────────────────────────────────
+// ─── LLM Service ─────────────────────────────────────────────────────────────
 class LLMService {
-  // Load the .so once and keep it alive
   static DynamicLibrary? _lib;
-  static _RunModelDart? _runFn;
+  static _RunModelDart?  _runFn;
 
   static void _ensureLoaded() {
     if (_lib != null) return;
-    _lib = DynamicLibrary.open('libllama_lib.so');
-    _runFn =
-        _lib!.lookupFunction<_RunModelNative, _RunModelDart>('run_model_path');
+    _lib  = DynamicLibrary.open('libllama_lib.so');
+    _runFn = _lib!
+        .lookupFunction<_RunModelNative, _RunModelDart>('run_model_path');
   }
 
-  /// Run inference. Offloads to a microtask so UI stays responsive.
-  /// modelPath  – absolute path to the .gguf file
-  /// prompt     – user text
+  /// Run inference on the given model file with the given prompt.
+  /// Always called from a background Isolate via compute().
   Future<String> run(String modelPath, String prompt) async {
     if (!Platform.isAndroid) return 'FFI only supported on Android.';
 
-    // Brief yield so the UI can update (show "thinking…") before we block
+    // Brief yield so the UI "thinking" state is rendered before blocking
     await Future<void>.delayed(Duration.zero);
 
     try {
       _ensureLoaded();
 
-      final mpPtr = modelPath.toNativeUtf8();
-      final pPtr  = prompt.toNativeUtf8();
-
+      final mpPtr     = modelPath.toNativeUtf8();
+      final pPtr      = prompt.toNativeUtf8();
       final resultPtr = _runFn!(mpPtr, pPtr);
-      final text = resultPtr.toDartString();
+      final text      = resultPtr.toDartString();
 
       malloc.free(mpPtr);
       malloc.free(pPtr);
-      // resultPtr is strdup'd by C – we have no cross-language free here;
-      // it leaks ~a few hundred bytes per call, acceptable for now.
 
       return text.isEmpty ? '(No response generated)' : text;
     } catch (e, st) {
@@ -51,14 +46,10 @@ class LLMService {
     }
   }
 
-  // ── Model file helpers ──────────────────────────────────────────────────────
+  // ── Model file helpers ────────────────────────────────────────────────────────
 
-  /// Directory where GGUF files are stored.
-  /// Uses app-private external storage – no special MANAGE_EXTERNAL_STORAGE
-  /// permission needed on Android 11+.
+  /// App-private external storage directory for GGUF models.
   static Future<Directory> get modelsDir async {
-    // getExternalStorageDirectory() → e.g.
-    //   /storage/emulated/0/Android/data/com.example.rama_ai/files
     final base = await getExternalStorageDirectory() ??
         await getApplicationDocumentsDirectory();
     final dir = Directory('${base.path}/RAMA_AI/models');
@@ -66,13 +57,13 @@ class LLMService {
     return dir;
   }
 
-  /// Absolute path where a named file will be saved.
+  /// Absolute path where a named model file will be saved.
   static Future<String> modelSavePath(String filename) async {
     final dir = await modelsDir;
     return '${dir.path}/$filename';
   }
 
-  /// List all .gguf files currently downloaded.
+  /// List all .gguf files currently stored in the models directory.
   static Future<List<File>> listModels() async {
     final dir = await modelsDir;
     if (!dir.existsSync()) return [];
