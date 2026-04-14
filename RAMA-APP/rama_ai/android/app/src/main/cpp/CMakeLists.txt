@@ -12,6 +12,12 @@ add_library(
     wrapper.cpp
 )
 
+target_include_directories(
+    llama_lib
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp/include
+)
+
 target_link_libraries(
     llama_lib
     llama

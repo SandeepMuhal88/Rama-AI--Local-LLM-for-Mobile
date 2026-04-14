@@ -12,12 +12,9 @@ import '../widgets/shared_widgets.dart';
 import 'profile_setup_screen.dart';
 import 'model_manager_screen.dart';
 
-// NOTE: compute() / background isolates are intentionally NOT used here.
-// FFI (libllama_lib.so) must be called from the root isolate on Android;
-// using compute() causes a native crash on the second call.  Instead we
-// schedule the blocking FFI call on the platform thread pool via Future.
+// NOTE: FFI (libllama_lib.so) must be called from the root isolate on Android.
+// We use Isolate.run() inside LLMService which handles this safely.
 
-// ─── Chat Screen ──────────────────────────────────────────────────────────────
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
 
@@ -25,57 +22,58 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
-  // Controllers
+class _ChatScreenState extends State<ChatScreen>
+    with TickerProviderStateMixin {
+  // ── Controllers ───────────────────────────────────────────────────────────
   final _ctrl   = TextEditingController();
   final _scroll = ScrollController();
   final _focus  = FocusNode();
 
-  // Current session
+  // ── State ─────────────────────────────────────────────────────────────────
   final List<ChatMessage> _messages = [];
-  bool    _thinking      = false;
-  bool    _inputFocused  = false;
+  bool    _thinking     = false;
+  bool    _focused      = false;
   String? _activeModelPath;
 
-  // Chat history (SQLite)
+  // ── Chat history ──────────────────────────────────────────────────────────
   List<Conversation> _conversations = [];
   int?   _currentConvId;
   bool   _historyLoading = false;
 
-  // Sidebar state
+  // ── Sidebar ───────────────────────────────────────────────────────────────
   bool _sidebarOpen = false;
   late final AnimationController _sidebarCtrl;
-  late final Animation<double>    _sidebarAnim;
+  late final Animation<double>   _sidebarAnim;
 
-  // User profile
+  // ── Thinking dots ─────────────────────────────────────────────────────────
+  late AnimationController _dotCtrl;
+
+  // ── User profile ──────────────────────────────────────────────────────────
   String _userName   = '';
   int    _userAvatar = 0;
 
-  // Thinking-dots animation
-  late AnimationController _dotCtrl;
-  late Animation<double>   _dotAnim;
-
-  static const _kAvatarEmojis = ['🧑', '👩', '👨', '🧙', '🦸', '🤖', '🦊', '🐼'];
-  static const _kSuggestions  = [
-    'What is machine learning?',
-    'Write a Python function to reverse a string',
-    'Explain quantum computing in simple terms',
-    'What are the benefits of meditation?',
+  static const _kAvatarEmojis = [
+    '🧑', '👩', '👨', '🧙', '🦸', '🤖', '🦊', '🐼',
+  ];
+  static const _kSuggestions = [
+    'Explain quantum computing simply',
+    'Write a Python function to sort a list',
+    'What are benefits of meditation?',
+    'Summarize the history of AI',
   ];
 
-  // ── Lifecycle ─────────────────────────────────────────────────────────────────
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
 
     _dotCtrl = AnimationController(
-      vsync: this,
+      vsync:    this,
       duration: const Duration(milliseconds: 900),
     )..repeat();
-    _dotAnim = Tween<double>(begin: 0, end: 1).animate(_dotCtrl);
 
     _sidebarCtrl = AnimationController(
-      vsync: this,
+      vsync:    this,
       duration: const Duration(milliseconds: 280),
     );
     _sidebarAnim = CurvedAnimation(
@@ -83,11 +81,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       curve:  Curves.easeOutCubic,
     );
 
-    _focus.addListener(() => setState(() => _inputFocused = _focus.hasFocus));
-    appTheme.addListener(() { if (mounted) setState(() {}); });
-
+    _focus.addListener(() => setState(() => _focused = _focus.hasFocus));
+    appTheme.addListener(_onThemeChange);
     _init();
   }
+
+  void _onThemeChange() { if (mounted) setState(() {}); }
 
   @override
   void dispose() {
@@ -96,13 +95,16 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     _ctrl.dispose();
     _scroll.dispose();
     _focus.dispose();
+    appTheme.removeListener(_onThemeChange);
     super.dispose();
   }
 
   Future<void> _init() async {
     await _requestPermissions();
-    await _loadProfile();
-    await _loadSavedModel();
+    await Future.wait([
+      _loadProfile(),
+      _loadSavedModel(),
+    ]);
     await _refreshModels();
     await _loadConversations();
   }
@@ -146,8 +148,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     if (mounted) setState(() => _activeModelPath = path);
   }
 
-  // ── Chat history ──────────────────────────────────────────────────────────────
-
+  // ── Chat history ──────────────────────────────────────────────────────────
   Future<void> _loadConversations() async {
     setState(() => _historyLoading = true);
     final convs = await ChatStorage.listConversations();
@@ -155,22 +156,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _startNewChat() async {
-    setState(() {
-      _messages.clear();
-      _currentConvId = null;
-    });
-    if (_sidebarOpen) _toggleSidebar();
+    setState(() { _messages.clear(); _currentConvId = null; });
+    if (_sidebarOpen) _closeSidebar();
   }
 
   Future<void> _loadConversation(Conversation conv) async {
     setState(() { _messages.clear(); _currentConvId = conv.id; });
-    if (_sidebarOpen) _toggleSidebar();
+    if (_sidebarOpen) _closeSidebar();
 
     final stored = await ChatStorage.loadMessages(conv.id!);
-    final msgs   = stored.map((s) => ChatMessage(
-      _roleFromString(s.role),
-      s.text,
-      time: s.time,
+    final msgs = stored.map((s) => ChatMessage(
+      _roleFromString(s.role), s.text, time: s.time,
     )).toList();
 
     if (mounted) {
@@ -195,21 +191,16 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 
-  // ── Send ─────────────────────────────────────────────────────────────────────
+  // ── Send ──────────────────────────────────────────────────────────────────
   Future<void> _send() async {
     final text = _ctrl.text.trim();
     if (text.isEmpty || _thinking) return;
 
     if (_activeModelPath == null) {
-      setState(() => _messages.add(ChatMessage(
-        MessageRole.error,
-        '⚠️ No model loaded. Tap ⚙️ to download or import one.',
-      )));
-      _scrollToBottom();
+      _showNoModelSnack();
       return;
     }
 
-    // Ensure conversation exists
     if (_currentConvId == null) {
       final id = await ChatStorage.createConversation(
         title: text.length > 40 ? '${text.substring(0, 38)}…' : text,
@@ -222,7 +213,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     setState(() { _messages.add(userMsg); _thinking = true; });
     _scrollToBottom();
 
-    // Persist user message
     await ChatStorage.insertMessage(StoredMessage(
       conversationId: _currentConvId!,
       role:           'user',
@@ -230,77 +220,64 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       time:           userMsg.time,
     ));
 
-    // Build context-aware prompt (last 8 messages)
     final contextMsgs = await ChatStorage.lastMessages(_currentConvId!, 8);
     final prompt      = _buildContextPrompt(contextMsgs, text);
-
     final String modelPath = _activeModelPath!;
-    final String reply;
 
     try {
-      // Run the blocking FFI call safely in a dedicated Isolate.
-      // LLMService.runInference() handles isolate lifecycle and the
-      // re-entrant guard (_busy flag) to prevent the second-message crash.
-      final raw = await LLMService.runInference(modelPath, prompt);
-      reply = cleanLLMResponse(raw);
-    } catch (e) {
-      final errMsg = ChatMessage(MessageRole.error, 'Error: $e');
-      if (mounted) {
-        setState(() { _messages.add(errMsg); _thinking = false; });
-        await ChatStorage.insertMessage(StoredMessage(
-          conversationId: _currentConvId!,
-          role:           'error',
-          text:           'Error: $e',
-          time:           errMsg.time,
-        ));
-        _scrollToBottom();
-      }
-      return;
-    }
+      final raw   = await LLMService.runInference(modelPath, prompt);
+      final reply = cleanLLMResponse(raw);
 
-    if (!mounted) return;
-    final aiRole = reply.startsWith('Error:') ? MessageRole.error : MessageRole.ai;
-    final aiMsg  = ChatMessage(aiRole, reply);
-    setState(() { _messages.add(aiMsg); _thinking = false; });
-    _scrollToBottom();
+      if (!mounted) return;
+      final role  = reply.startsWith('Error:') ? MessageRole.error : MessageRole.ai;
+      final aiMsg = ChatMessage(role, reply);
+      setState(() { _messages.add(aiMsg); _thinking = false; });
+      _scrollToBottom();
 
-    // Persist AI response
-    await ChatStorage.insertMessage(StoredMessage(
-      conversationId: _currentConvId!,
-      role:           aiRole == MessageRole.error ? 'error' : 'ai',
-      text:           reply,
-      time:           aiMsg.time,
-    ));
+      await ChatStorage.insertMessage(StoredMessage(
+        conversationId: _currentConvId!,
+        role:           role == MessageRole.error ? 'error' : 'ai',
+        text:           reply,
+        time:           aiMsg.time,
+      ));
 
-    // Update conversation title from first exchange if still "New Chat"
-    final conv = _conversations.firstWhere(
-      (c) => c.id == _currentConvId,
-      orElse: () => Conversation(
-        id: _currentConvId, title: '', createdAt: DateTime.now(), updatedAt: DateTime.now(),
-      ),
-    );
-    if (conv.title.isEmpty || conv.title == 'New Chat') {
-      await ChatStorage.updateTitle(
-        _currentConvId!,
-        text.length > 40 ? '${text.substring(0, 38)}…' : text,
+      // Update title after first AI reply
+      final conv = _conversations.firstWhere(
+        (c) => c.id == _currentConvId,
+        orElse: () => Conversation(
+          id: _currentConvId, title: '', createdAt: DateTime.now(), updatedAt: DateTime.now(),
+        ),
       );
-    }
+      if (conv.title.isEmpty || conv.title == 'New Chat') {
+        await ChatStorage.updateTitle(
+          _currentConvId!,
+          text.length > 40 ? '${text.substring(0, 38)}…' : text,
+        );
+      }
+      await _loadConversations();
 
-    await _loadConversations();
+    } catch (e) {
+      if (!mounted) return;
+      final errMsg = ChatMessage(MessageRole.error, 'Error: $e');
+      setState(() { _messages.add(errMsg); _thinking = false; });
+      await ChatStorage.insertMessage(StoredMessage(
+        conversationId: _currentConvId!,
+        role:           'error',
+        text:           'Error: $e',
+        time:           errMsg.time,
+      ));
+      _scrollToBottom();
+    }
   }
 
-  /// Builds a context-injected prompt from recent conversation history.
-  String _buildContextPrompt(List<StoredMessage> history, String currentInput) {
-    if (history.isEmpty) return currentInput;
+  String _buildContextPrompt(List<StoredMessage> history, String input) {
+    if (history.isEmpty) return input;
     final buf = StringBuffer();
     for (final msg in history) {
-      if (msg.role == 'user') {
-        buf.write('User: ${msg.text}\n');
-      } else if (msg.role == 'ai') {
-        buf.write('Assistant: ${msg.text}\n');
-      }
+      if (msg.role == 'user') buf.write('User: ${msg.text}\n');
+      else if (msg.role == 'ai') buf.write('Assistant: ${msg.text}\n');
     }
-    buf.write('User: $currentInput\nAssistant:');
+    buf.write('User: $input\nAssistant:');
     return buf.toString();
   }
 
@@ -308,37 +285,64 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
         _scroll.animateTo(
-          _scroll.position.maxScrollExtent + 120,
+          _scroll.position.maxScrollExtent + 100,
           duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOutCubic,
+          curve:    Curves.easeOutCubic,
         );
       }
     });
   }
 
-  // ── Sidebar ───────────────────────────────────────────────────────────────────
-  void _toggleSidebar() {
-    if (_sidebarOpen) {
-      _sidebarCtrl.reverse().then((_) {
-        if (mounted) setState(() => _sidebarOpen = false);
-      });
-    } else {
-      setState(() => _sidebarOpen = true);
-      _sidebarCtrl.forward();
-    }
+  void _showNoModelSnack() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: const [
+            Icon(Icons.warning_amber_rounded, color: Colors.white, size: 16),
+            SizedBox(width: 8),
+            Text('No model loaded — tap Models to download one',
+                style: TextStyle(color: Colors.white, fontSize: 13)),
+          ],
+        ),
+        backgroundColor: RamaColors.warning,
+        behavior:        SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        margin: const EdgeInsets.all(14),
+        action: SnackBarAction(
+          label:     'MODELS',
+          textColor: Colors.white,
+          onPressed: _openModelManager,
+        ),
+      ),
+    );
   }
 
-  // ── Theme helpers ─────────────────────────────────────────────────────────────
-  Color get _bg      => appTheme.isDark ? RamaColors.darkBg      : RamaColors.lightBg;
-  Color get _surface => appTheme.isDark ? RamaColors.darkSurface  : RamaColors.lightSurface;
-  Color get _card    => appTheme.isDark ? RamaColors.darkCard     : RamaColors.lightCard;
-  Color get _border  => appTheme.isDark ? RamaColors.darkBorder   : RamaColors.lightBorder;
-  Color get _text    => appTheme.isDark ? RamaColors.darkText     : RamaColors.lightText;
-  Color get _sub     => appTheme.isDark ? RamaColors.darkTextSub  : RamaColors.lightTextSub;
-  Color get _dim     => appTheme.isDark ? RamaColors.darkTextDim  : RamaColors.lightTextDim;
+  // ── Sidebar ───────────────────────────────────────────────────────────────
+  void _openSidebar() {
+    setState(() => _sidebarOpen = true);
+    _sidebarCtrl.forward();
+  }
+
+  void _closeSidebar() {
+    _sidebarCtrl.reverse().then((_) {
+      if (mounted) setState(() => _sidebarOpen = false);
+    });
+  }
+
+  void _toggleSidebar() {
+    _sidebarOpen ? _closeSidebar() : _openSidebar();
+  }
+
+  // ── Theme tokens ──────────────────────────────────────────────────────────
+  Color get _bg      => appTheme.bg;
+  Color get _surface => appTheme.surface;
+  Color get _card    => appTheme.card;
+  Color get _border  => appTheme.border;
+  Color get _text    => appTheme.text;
+  Color get _sub     => appTheme.sub;
+  Color get _dim     => appTheme.dim;
   Color get _accent  => appTheme.accent;
 
-  // ── Greeting ─────────────────────────────────────────────────────────────────
   String get _greeting {
     final h = DateTime.now().hour;
     if (h < 5)  return 'Good night';
@@ -347,22 +351,16 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     if (h < 21) return 'Good evening';
     return 'Good night';
   }
-  String get _greetingEmoji {
-    final h = DateTime.now().hour;
-    if (h < 5)  return '🌙';
-    if (h < 12) return '☀️';
-    if (h < 17) return '🌤';
-    if (h < 21) return '🌆';
-    return '🌙';
-  }
 
-  String _modelName() {
+  String _modelLabel() {
     if (_activeModelPath == null) return 'No model loaded';
     final fn = _activeModelPath!.split('/').last;
-    return fn.length > 30 ? '${fn.substring(0, 28)}…' : fn;
+    // strip .gguf, trim length
+    final name = fn.replaceAll('.gguf', '');
+    return name.length > 28 ? '${name.substring(0, 26)}…' : name;
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────────
+  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -370,7 +368,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       body: SafeArea(
         child: Stack(
           children: [
-            // ── Main chat area ─────────────────────────────────────────────
+            // ── Main column ──────────────────────────────────────────────────
             Column(
               children: [
                 _buildAppBar(),
@@ -378,7 +376,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   child: GestureDetector(
                     onTap: () {
                       _focus.unfocus();
-                      if (_sidebarOpen) _toggleSidebar();
+                      if (_sidebarOpen) _closeSidebar();
                     },
                     child: _messages.isEmpty && !_thinking
                         ? _buildEmptyState()
@@ -390,17 +388,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               ],
             ),
 
-            // ── Sidebar overlay ────────────────────────────────────────────
+            // ── Sidebar overlay ──────────────────────────────────────────────
             if (_sidebarOpen) ...[
-              // Dim scrim
               FadeTransition(
                 opacity: _sidebarAnim,
                 child: GestureDetector(
-                  onTap: _toggleSidebar,
-                  child: Container(color: Colors.black.withValues(alpha: 0.50)),
+                  onTap: _closeSidebar,
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.55),
+                  ),
                 ),
               ),
-              // Drawer panel
               SlideTransition(
                 position: Tween<Offset>(
                   begin: const Offset(-1, 0),
@@ -415,53 +413,53 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── App Bar ───────────────────────────────────────────────────────────────────
+  // ── App Bar ───────────────────────────────────────────────────────────────
   Widget _buildAppBar() {
+    final modelLoaded = _activeModelPath != null;
     return Container(
-      height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color:  _surface,
-        border: Border(bottom: BorderSide(color: _border)),
-        boxShadow: [
-          BoxShadow(
-            color:      Colors.black.withValues(alpha: appTheme.isDark ? 0.3 : 0.06),
-            blurRadius: 12,
-            offset:     const Offset(0, 2),
-          ),
-        ],
+        border: Border(bottom: BorderSide(color: _border, width: 0.5)),
       ),
       child: Row(
         children: [
-          // Sidebar toggle (hamburger)
-          RamaIconBtn(
-            icon:    Icons.menu_rounded,
-            tooltip: 'Chat history',
-            color:   _sub, bg: _card, border: _border,
-            onTap:   _toggleSidebar,
+          // Hamburger
+          _NavBtn(
+            icon:  Icons.menu_rounded,
+            color: _sub,
+            onTap: _toggleSidebar,
           ),
-          const SizedBox(width: 10),
-          Hero(tag: 'rama_logo', child: LogoBadge(size: 36, accent: _accent)),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
+
+          // Logo + title
+          LogoBadge(size: 32, accent: _accent),
+          const SizedBox(width: 9),
           Expanded(
             child: Column(
               mainAxisAlignment:  MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('RAMA AI',
-                    style: TextStyle(
-                      color:       _text,
-                      fontWeight:  FontWeight.w800,
-                      fontSize:    15,
-                      letterSpacing: 0.8,
-                    )),
+                Text(
+                  'RAMA AI',
+                  style: TextStyle(
+                    color:      _text,
+                    fontWeight: FontWeight.w800,
+                    fontSize:   14,
+                    letterSpacing: 0.8,
+                  ),
+                ),
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 250),
                   child: Text(
-                    _modelName(),
+                    _modelLabel(),
                     key:      ValueKey(_activeModelPath),
-                    style:    TextStyle(color: _sub, fontSize: 10.5),
                     overflow: TextOverflow.ellipsis,
+                    style:    TextStyle(
+                      color:    _sub,
+                      fontSize: 10.5,
+                    ),
                   ),
                 ),
               ],
@@ -470,106 +468,93 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
           // Status dot
           Container(
-            width: 8, height: 8,
+            width: 7, height: 7,
             margin: const EdgeInsets.only(right: 10),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: _activeModelPath != null
-                  ? const Color(0xFF4CAF50)
-                  : Colors.orange,
+              color: modelLoaded ? RamaColors.success : RamaColors.warning,
               boxShadow: [
                 BoxShadow(
-                  color: (_activeModelPath != null
-                          ? const Color(0xFF4CAF50)
-                          : Colors.orange)
-                      .withValues(alpha: 0.5),
-                  blurRadius: 6,
+                  color: (modelLoaded ? RamaColors.success : RamaColors.warning)
+                      .withValues(alpha: 0.55),
+                  blurRadius: 5,
                 ),
               ],
             ),
           ),
 
           // New chat
-          RamaIconBtn(
-            icon:    Icons.add_comment_rounded,
-            tooltip: 'New chat',
-            color:   _accent, bg: _card, border: _border,
-            onTap:   _startNewChat,
+          _NavBtn(
+            icon:  Icons.edit_note_rounded,
+            color: _accent,
+            onTap: _startNewChat,
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
 
-          // Dark/light toggle
-          RamaIconBtn(
-            icon: appTheme.isDark
-                ? Icons.light_mode_rounded
-                : Icons.dark_mode_rounded,
-            tooltip: appTheme.isDark ? 'Light mode' : 'Dark mode',
-            color: _accent, bg: _card, border: _border,
+          // Theme toggle
+          _NavBtn(
+            icon:  appTheme.isDark
+                ? Icons.light_mode_outlined
+                : Icons.dark_mode_outlined,
+            color: _sub,
             onTap: () async {
               appTheme.toggle();
               final prefs = await SharedPreferences.getInstance();
               await prefs.setBool('theme_dark', appTheme.isDark);
               SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-                statusBarColor:          Colors.transparent,
-                statusBarIconBrightness: appTheme.isDark ? Brightness.light : Brightness.dark,
+                statusBarColor:
+                    Colors.transparent,
+                statusBarIconBrightness:
+                    appTheme.isDark ? Brightness.light : Brightness.dark,
               ));
             },
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
 
-          // Model manager
-          RamaIconBtn(
-            icon:    Icons.tune_rounded,
-            tooltip: 'Model Manager',
-            color:   _accent, bg: _card, border: _border,
-            onTap:   _openModelManager,
-          ),
-          const SizedBox(width: 6),
-
-          // Profile
-          RamaIconBtn(
-            icon:    Icons.manage_accounts_rounded,
-            tooltip: 'Edit Profile',
-            color:   _accent, bg: _card, border: _border,
-            onTap:   _openProfile,
+          // Models
+          _NavBtn(
+            icon:  Icons.grid_view_rounded,
+            color: _sub,
+            onTap: _openModelManager,
           ),
         ],
       ),
     );
   }
 
-  // ── Sidebar ───────────────────────────────────────────────────────────────────
+  // ── Sidebar ───────────────────────────────────────────────────────────────
   Widget _buildSidebar() {
-    final sideW = MediaQuery.of(context).size.width * 0.80;
+    final w = (MediaQuery.of(context).size.width * 0.82).clamp(260.0, 320.0);
     return Container(
-      width:   sideW.clamp(240.0, 320.0),
-      height:  double.infinity,
-      color:   _surface,
+      width:  w,
+      height: double.infinity,
+      color:  _surface,
       child: Column(
         children: [
-          // Sidebar header
+          // Header
           Container(
             padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
             decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: _border)),
+              border: Border(bottom: BorderSide(color: _border, width: 0.5)),
             ),
             child: Row(
               children: [
-                LogoBadge(size: 34, accent: _accent),
+                LogoBadge(size: 30, accent: _accent),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Chat History',
+                    'Conversations',
                     style: TextStyle(
                       color:      _text,
-                      fontWeight: FontWeight.w800,
-                      fontSize:   16,
+                      fontWeight: FontWeight.w700,
+                      fontSize:   15,
                     ),
                   ),
                 ),
-                GestureDetector(
-                  onTap: _toggleSidebar,
-                  child: Icon(Icons.close_rounded, color: _sub, size: 22),
+                _NavBtn(
+                  icon:  Icons.close_rounded,
+                  color: _sub,
+                  onTap: _closeSidebar,
                 ),
               ],
             ),
@@ -577,93 +562,51 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
           // New chat button
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-            child: GestureDetector(
-              onTap: _startNewChat,
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [_accent, _accent.withValues(alpha: 0.75)],
-                    begin: Alignment.topLeft,
-                    end:   Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color:      _accent.withValues(alpha: 0.35),
-                      blurRadius: 14,
-                      offset:     const Offset(0, 5),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    Icon(Icons.add_rounded, color: Colors.white, size: 18),
-                    SizedBox(width: 8),
-                    Text(
-                      'New Chat',
-                      style: TextStyle(
-                        color:      Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize:   14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: _GradientButton(
+              label: '+ New Chat',
+              accent: _accent,
+              onTap:  _startNewChat,
             ),
           ),
+
+          RamaDivider(color: _border),
 
           // Conversation list
           Expanded(
             child: _historyLoading
-                ? Center(child: CircularProgressIndicator(color: _accent, strokeWidth: 2))
+                ? Center(child: CircularProgressIndicator(
+                    color: _accent, strokeWidth: 2))
                 : _conversations.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.chat_bubble_outline_rounded,
-                                color: _dim, size: 36),
-                            const SizedBox(height: 10),
-                            Text('No chats yet',
-                                style: TextStyle(color: _sub, fontSize: 14)),
-                            const SizedBox(height: 4),
-                            Text('Start a conversation!',
-                                style: TextStyle(color: _dim, fontSize: 12)),
-                          ],
-                        ),
-                      )
+                    ? _buildSidebarEmpty()
                     : ListView.builder(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 8),
+                            horizontal: 8, vertical: 8),
                         itemCount: _conversations.length,
-                        itemBuilder: (ctx, i) =>
+                        itemBuilder: (_, i) =>
                             _conversationTile(_conversations[i]),
                       ),
           ),
 
-          // User profile row at bottom
+          // User row
           Container(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              border: Border(top: BorderSide(color: _border)),
+              border: Border(top: BorderSide(color: _border, width: 0.5)),
             ),
             child: Row(
               children: [
                 Container(
-                  width: 36, height: 36,
+                  width: 34, height: 34,
                   decoration: BoxDecoration(
-                    color:         _accent.withValues(alpha: 0.15),
-                    borderRadius:  BorderRadius.circular(10),
-                    border:        Border.all(color: _accent.withValues(alpha: 0.4)),
+                    color:        _accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border:       Border.all(color: _accent.withValues(alpha: 0.30)),
                   ),
                   child: Center(
                     child: Text(
-                      _kAvatarEmojis[_userAvatar.clamp(0, _kAvatarEmojis.length - 1)],
-                      style: const TextStyle(fontSize: 17),
+                      _kAvatarEmojis[_userAvatar.clamp(0, 7)],
+                      style: const TextStyle(fontSize: 16),
                     ),
                   ),
                 ),
@@ -678,13 +621,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                             fontWeight: FontWeight.w600,
                             fontSize:   13,
                           )),
-                      Text('${_conversations.length} conversation(s)',
+                      Text('${_conversations.length} chats',
                           style: TextStyle(color: _dim, fontSize: 10.5)),
                     ],
                   ),
                 ),
                 GestureDetector(
-                  onTap: () { _toggleSidebar(); _openProfile(); },
+                  onTap: () { _closeSidebar(); _openProfile(); },
                   child: Icon(Icons.settings_rounded, color: _sub, size: 18),
                 ),
               ],
@@ -695,37 +638,56 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
+  Widget _buildSidebarEmpty() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.chat_bubble_outline_rounded, color: _dim, size: 34),
+          const SizedBox(height: 10),
+          Text('No chats yet',
+              style: TextStyle(color: _sub, fontSize: 13)),
+          const SizedBox(height: 4),
+          Text('Start your first conversation!',
+              style: TextStyle(color: _dim, fontSize: 11)),
+        ],
+      ),
+    );
+  }
+
   Widget _conversationTile(Conversation conv) {
     final isActive  = conv.id == _currentConvId;
-    final updatedAt = conv.updatedAt;
     final now       = DateTime.now();
-    final dateLabel = now.difference(updatedAt).inDays == 0
-        ? '${updatedAt.hour.toString().padLeft(2, '0')}:'
-          '${updatedAt.minute.toString().padLeft(2, '0')}'
-        : '${updatedAt.day}/${updatedAt.month}';
+    final upd       = conv.updatedAt;
+    final dateLabel = now.difference(upd).inDays == 0
+        ? '${upd.hour.toString().padLeft(2, '0')}:${upd.minute.toString().padLeft(2, '0')}'
+        : '${upd.day}/${upd.month}';
+    final title = conv.title.isEmpty ? 'New Chat' : conv.title;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 4),
+      margin: const EdgeInsets.only(bottom: 2),
       decoration: BoxDecoration(
-        color:         isActive ? _accent.withValues(alpha: 0.12) : Colors.transparent,
-        borderRadius:  BorderRadius.circular(12),
-        border:        isActive
-            ? Border.all(color: _accent.withValues(alpha: 0.3))
+        color:        isActive ? _accent.withValues(alpha: 0.10) : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        border: isActive
+            ? Border.all(color: _accent.withValues(alpha: 0.25))
             : null,
       ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           onTap: () => _loadConversation(conv),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
               children: [
                 Icon(
-                  Icons.chat_bubble_outline_rounded,
+                  isActive
+                      ? Icons.chat_bubble_rounded
+                      : Icons.chat_bubble_outline_rounded,
                   color: isActive ? _accent : _dim,
-                  size:  16,
+                  size:  14,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -733,28 +695,27 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        conv.title.isEmpty ? 'New Chat' : conv.title,
+                        title,
                         style: TextStyle(
                           color:      isActive ? _accent : _text,
                           fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
                           fontSize:   13,
                         ),
-                        maxLines:  1,
-                        overflow:  TextOverflow.ellipsis,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 1),
                       Text(dateLabel,
-                          style: TextStyle(color: _dim, fontSize: 10)),
+                          style: TextStyle(color: _dim, fontSize: 9.5)),
                     ],
                   ),
                 ),
-                // Delete button
                 GestureDetector(
                   onTap: () => _confirmDelete(conv),
                   child: Padding(
-                    padding: const EdgeInsets.only(left: 6),
+                    padding: const EdgeInsets.only(left: 8),
                     child: Icon(Icons.delete_outline_rounded,
-                        color: _dim, size: 16),
+                        color: _dim, size: 15),
                   ),
                 ),
               ],
@@ -766,160 +727,226 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _confirmDelete(Conversation conv) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: _card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Delete chat?',
-            style: TextStyle(color: _text, fontWeight: FontWeight.w700)),
-        content: Text(
-          '"${conv.title.isEmpty ? 'New Chat' : conv.title}"\nThis action cannot be undone.',
-          style: TextStyle(color: _sub, fontSize: 13, height: 1.5),
+    final ok = await showModalBottomSheet<bool>(
+      context:           context,
+      backgroundColor:   _card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36, height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color:        _border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Icon(Icons.delete_forever_rounded,
+                  color: RamaColors.error, size: 36),
+              const SizedBox(height: 12),
+              Text(
+                'Delete this chat?',
+                style: TextStyle(
+                  color:      _text,
+                  fontWeight: FontWeight.w700,
+                  fontSize:   16,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '"${conv.title.isEmpty ? 'New Chat' : conv.title}"\nThis cannot be undone.',
+                textAlign: TextAlign.center,
+                style:     TextStyle(color: _sub, fontSize: 13, height: 1.5),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: _OutlineBtn(
+                      label: 'Cancel',
+                      onTap: () => Navigator.pop(ctx, false),
+                      color: _sub,
+                      border: _border,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _FilledBtn(
+                      label: 'Delete',
+                      onTap: () => Navigator.pop(ctx, true),
+                      color: RamaColors.error,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: TextStyle(color: _sub)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
       ),
     );
     if (ok == true) await _deleteConversation(conv);
   }
 
-  // ── Empty / Greeting State ────────────────────────────────────────────────────
+  // ── Empty state ───────────────────────────────────────────────────────────
   Widget _buildEmptyState() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          LogoBadge(size: 84, accent: _accent),
-          const SizedBox(height: 22),
-
-          // Greeting card
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  _accent.withValues(alpha: 0.15),
-                  _accent.withValues(alpha: 0.05),
-                ],
-                begin: Alignment.topLeft,
-                end:   Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _accent.withValues(alpha: 0.25)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(_greetingEmoji, style: const TextStyle(fontSize: 26)),
-                const SizedBox(width: 10),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '$_greeting, $_userName!',
-                      style: TextStyle(
-                        color:      _text,
-                        fontSize:   18,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    Text(
-                      "I'm ready — what's on your mind?",
-                      style: TextStyle(color: _sub, fontSize: 12.5),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          // Logo + glow
+          Stack(
+            alignment: Alignment.center,
             children: [
-              Text(
-                _kAvatarEmojis[_userAvatar.clamp(0, _kAvatarEmojis.length - 1)],
-                style: const TextStyle(fontSize: 20),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                _userName,
-                style: TextStyle(
-                  color:      _sub,
-                  fontSize:   14,
-                  fontWeight: FontWeight.w500,
+              Container(
+                width: 100, height: 100,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      _accent.withValues(alpha: 0.15),
+                      Colors.transparent,
+                    ],
+                  ),
                 ),
               ),
+              LogoBadge(size: 68, accent: _accent),
             ],
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 20),
+
+          // Greeting
+          Text(
+            '$_greeting, $_userName $_kAvatarEmojis[${_userAvatar.clamp(0, 7)}]',
+            style: TextStyle(
+              color:      _text,
+              fontSize:   22,
+              fontWeight: FontWeight.w800,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _activeModelPath != null
+                ? "I'm ready to help — what's on your mind?"
+                : 'Load a model to start chatting',
+            style: TextStyle(color: _sub, fontSize: 14),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 28),
 
           if (_activeModelPath == null) ...[
             ActionCard(
-              icon:     Icons.download_rounded,
-              title:    'Load a Model',
-              subtitle: 'Download or import a .gguf model file',
+              icon:     Icons.download_for_offline_rounded,
+              title:    'Download a Model',
+              subtitle: 'Browse & download GGUF models to get started',
               color:    _accent,
               onTap:    _openModelManager,
             ),
+            const SizedBox(height: 12),
+            ActionCard(
+              icon:     Icons.folder_open_rounded,
+              title:    'Import from Device',
+              subtitle: 'Load a .gguf file you already have',
+              color:    const Color(0xFF06B6D4),
+              onTap:    _openModelManager,
+            ),
           ] else ...[
-            Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: Text(
-                'TRY ASKING',
-                style: TextStyle(
-                  color:         _dim,
-                  fontSize:      10,
-                  fontWeight:    FontWeight.w700,
-                  letterSpacing: 1.5,
+            // Active model chip
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color:        _accent.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(100),
+                border:       Border.all(color: _accent.withValues(alpha: 0.22)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 6, height: 6,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: RamaColors.success,
+                      boxShadow: [
+                        BoxShadow(
+                          color:      RamaColors.success.withValues(alpha: 0.5),
+                          blurRadius: 4,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _modelLabel(),
+                    style: TextStyle(
+                      color:      _accent,
+                      fontSize:   12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 28),
+
+            // Suggestion label
+            Row(
+              children: [
+                Expanded(child: RamaDivider(color: _border)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Text(
+                    'TRY ASKING',
+                    style: TextStyle(
+                      color:         _dim,
+                      fontSize:      10,
+                      fontWeight:    FontWeight.w700,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
                 ),
-              ),
+                Expanded(child: RamaDivider(color: _border)),
+              ],
             ),
-            ..._kSuggestions.map(
-              (s) => SuggestionChip(
-                label: s,
-                card: _card, border: _border,
-                text: _text, sub: _sub, dim: _dim,
-                onTap: () { _ctrl.text = s; _send(); },
-              ),
-            ),
+            const SizedBox(height: 14),
+
+            ..._kSuggestions.map((s) => SuggestionChip(
+              label:  s,
+              card:   _card,
+              border: _border,
+              text:   _text,
+              sub:    _sub,
+              dim:    _dim,
+              onTap:  () { _ctrl.text = s; _send(); },
+            )),
           ],
         ],
       ),
     );
   }
 
-  // ── Message list ──────────────────────────────────────────────────────────────
+  // ── Message list ──────────────────────────────────────────────────────────
   Widget _buildMessageList() {
     return ListView.builder(
       controller: _scroll,
-      padding:    const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+      padding:    const EdgeInsets.fromLTRB(14, 18, 14, 12),
       itemCount:  _messages.length,
       itemBuilder: (ctx, i) {
         final msg    = _messages[i];
         final isLast = i == _messages.length - 1;
-        // Play typewriter animation only on the latest AI reply while
-        // the model is NOT still thinking (i.e. the reply just arrived).
-        final isStreaming = isLast &&
-            msg.role == MessageRole.ai &&
-            !_thinking;
         return MessageBubble(
           key:             ValueKey('${msg.time.millisecondsSinceEpoch}_$i'),
           message:         msg,
           isLast:          isLast,
-          isStreaming:     isStreaming,
+          isStreaming:     isLast && msg.role == MessageRole.ai && !_thinking,
           userName:        _userName,
-          userAvatarEmoji: _kAvatarEmojis[_userAvatar.clamp(0, _kAvatarEmojis.length - 1)],
+          userAvatarEmoji: _kAvatarEmojis[_userAvatar.clamp(0, 7)],
           accent:          _accent,
           isDark:          appTheme.isDark,
           card:            _card,
@@ -932,25 +959,26 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── Thinking bar ──────────────────────────────────────────────────────────────
+  // ── Thinking bar ──────────────────────────────────────────────────────────
   Widget _buildThinkingBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         children: [
-          LogoBadge(size: 28, accent: _accent),
+          LogoBadge(size: 26, accent: _accent),
           const SizedBox(width: 10),
           AnimatedBuilder(
-            animation: _dotAnim,
-            builder:  (ctx, _) => Row(
+            animation: _dotCtrl,
+            builder: (_, __) => Row(
+              mainAxisSize: MainAxisSize.min,
               children: List.generate(3, (i) {
-                final phase   = ((_dotAnim.value * 3) - i) % 3;
+                final phase   = ((_dotCtrl.value * 3) - i) % 3;
                 final opacity = phase < 1
                     ? phase
                     : (phase < 2 ? 1.0 : 3.0 - phase);
                 return Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 2.5),
-                  width: 6, height: 6,
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  width: 5, height: 5,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: _accent.withValues(
@@ -961,47 +989,42 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             ),
           ),
           const SizedBox(width: 10),
-          Text('Generating response…',
-              style: TextStyle(color: _sub, fontSize: 12.5)),
+          Text('Generating…',
+              style: TextStyle(color: _sub, fontSize: 12)),
         ],
       ),
     );
   }
 
-  // ── Input area ────────────────────────────────────────────────────────────────
+  // ── Input area ────────────────────────────────────────────────────────────
   Widget _buildInputArea() {
+    final hasText = _ctrl.text.trim().isNotEmpty;
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
+      duration: const Duration(milliseconds: 180),
       decoration: BoxDecoration(
         color:  _surface,
         border: Border(
           top: BorderSide(
-            color: _inputFocused ? _accent.withValues(alpha: 0.4) : _border,
+            color: _focused ? _accent.withValues(alpha: 0.35) : _border,
+            width: 0.5,
           ),
         ),
-        boxShadow: [
-          BoxShadow(
-            color:      Colors.black.withValues(alpha: appTheme.isDark ? 0.25 : 0.06),
-            blurRadius: 16,
-            offset:     const Offset(0, -4),
-          ),
-        ],
       ),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
             child: Container(
-              constraints: const BoxConstraints(maxHeight: 140),
+              constraints: const BoxConstraints(maxHeight: 130),
               decoration: BoxDecoration(
-                color:         _card,
-                borderRadius:  BorderRadius.circular(20),
+                color:        _card,
+                borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: _inputFocused
-                      ? _accent.withValues(alpha: 0.5)
+                  color: _focused
+                      ? _accent.withValues(alpha: 0.45)
                       : _border,
-                  width: 1.2,
+                  width: 1,
                 ),
               ),
               child: TextField(
@@ -1024,9 +1047,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(width: 8),
           SendButton(
-            enabled:  _ctrl.text.trim().isNotEmpty && !_thinking,
+            enabled:  hasText && !_thinking,
             thinking: _thinking,
-            accent:   _accent, card: _card, border: _border,
+            accent:   _accent,
+            card:     _card,
+            border:   _border,
             onTap:    _send,
           ),
         ],
@@ -1034,22 +1059,22 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── Navigation ────────────────────────────────────────────────────────────────
+  // ── Navigation ────────────────────────────────────────────────────────────
   void _openModelManager() {
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (ctx2, a1, a2) => ModelManagerScreen(
+        pageBuilder: (_, a1, a2) => ModelManagerScreen(
           activeModelPath: _activeModelPath,
           onModelSelected: _setActiveModel,
         ),
-        transitionsBuilder: (ctx2, anim, a2, child) => SlideTransition(
+        transitionsBuilder: (_, anim, __, child) => SlideTransition(
           position: Tween<Offset>(
             begin: const Offset(0, 1), end: Offset.zero,
           ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
           child: child,
         ),
-        transitionDuration: const Duration(milliseconds: 350),
+        transitionDuration: const Duration(milliseconds: 320),
       ),
     ).then((_) => _refreshModels());
   }
@@ -1058,15 +1083,157 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (ctx2, a1, a2) => const ProfileSetupScreen(),
-        transitionsBuilder: (ctx2, anim, a2, child) => SlideTransition(
+        pageBuilder: (_, a1, a2) => const ProfileSetupScreen(),
+        transitionsBuilder: (_, anim, __, child) => SlideTransition(
           position: Tween<Offset>(
             begin: const Offset(0, 1), end: Offset.zero,
           ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
           child: child,
         ),
-        transitionDuration: const Duration(milliseconds: 350),
+        transitionDuration: const Duration(milliseconds: 320),
       ),
     ).then((_) => _loadProfile());
+  }
+}
+
+// ─── Local helper widgets ──────────────────────────────────────────────────────
+
+class _NavBtn extends StatefulWidget {
+  final IconData     icon;
+  final Color        color;
+  final VoidCallback onTap;
+  const _NavBtn({required this.icon, required this.color, required this.onTap});
+
+  @override
+  State<_NavBtn> createState() => _NavBtnState();
+}
+
+class _NavBtnState extends State<_NavBtn> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = appTheme.card;
+    return GestureDetector(
+      onTapDown:   (_) => setState(() => _pressed = true),
+      onTapUp:     (_) { setState(() => _pressed = false); widget.onTap(); },
+      onTapCancel: ()  => setState(() => _pressed = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 100),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color:        _pressed ? c.withValues(alpha: 0.8) : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(widget.icon, color: widget.color, size: 20),
+      ),
+    );
+  }
+}
+
+class _GradientButton extends StatelessWidget {
+  final String       label;
+  final Color        accent;
+  final VoidCallback onTap;
+  const _GradientButton({required this.label, required this.accent, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width:   double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [accent, accent.withValues(alpha: 0.75)],
+            begin: Alignment.topLeft,
+            end:   Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color:      accent.withValues(alpha: 0.28),
+              blurRadius: 12,
+              offset:     const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color:      Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize:   14,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FilledBtn extends StatelessWidget {
+  final String       label;
+  final Color        color;
+  final VoidCallback onTap;
+  const _FilledBtn({required this.label, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        decoration: BoxDecoration(
+          color:        color,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: Text(label,
+              style: const TextStyle(
+                color:      Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize:   14,
+              )),
+        ),
+      ),
+    );
+  }
+}
+
+class _OutlineBtn extends StatelessWidget {
+  final String       label;
+  final Color        color;
+  final Color        border;
+  final VoidCallback onTap;
+  const _OutlineBtn({
+    required this.label,
+    required this.color,
+    required this.border,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 13),
+        decoration: BoxDecoration(
+          color:        color.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(12),
+          border:       Border.all(color: border),
+        ),
+        child: Center(
+          child: Text(label,
+              style: TextStyle(
+                color:      color,
+                fontWeight: FontWeight.w700,
+                fontSize:   14,
+              )),
+        ),
+      ),
+    );
   }
 }
