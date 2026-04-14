@@ -95,7 +95,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen>
         context,
         PageRouteBuilder(
           pageBuilder: (_, a1, a2) => const ChatScreen(),
-          transitionsBuilder: (_, anim, __, child) =>
+          transitionsBuilder: (context, anim, _, child) =>
               FadeTransition(opacity: anim, child: child),
           transitionDuration: const Duration(milliseconds: 450),
         ),

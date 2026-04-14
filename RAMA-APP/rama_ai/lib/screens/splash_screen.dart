@@ -76,7 +76,7 @@ class _SplashScreenState extends State<SplashScreen>
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder:    (_, a1, a2) => const EntryPoint(),
-        transitionsBuilder: (_, anim, __, child) =>
+        transitionsBuilder: (context, anim, _, child) =>
             FadeTransition(opacity: anim, child: child),
         transitionDuration: const Duration(milliseconds: 500),
       ),
@@ -189,7 +189,7 @@ class _SplashScreenState extends State<SplashScreen>
                   opacity: _tagFade,
                   child: AnimatedBuilder(
                     animation: _dotsCtrl,
-                    builder: (_, __) => Row(
+                    builder: (context, _) => Row(
                       mainAxisSize: MainAxisSize.min,
                       children: List.generate(3, (i) {
                         final phase   = ((_dotsCtrl.value * 3) - i) % 3;

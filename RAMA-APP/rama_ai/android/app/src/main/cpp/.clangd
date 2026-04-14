@@ -1,0 +1,10 @@
+CompileFlags:
+  Add:
+    # Tell clangd where llama.h lives (same path as CMakeLists.txt line 18)
+    - -I./llama.cpp/include
+    - -I./llama.cpp
+    - -I./llama.cpp/ggml/include
+    # Android NDK target so clangd knows this is Android C++
+    - --target=aarch64-linux-android
+    - -DANDROID
+    - -std=c++17

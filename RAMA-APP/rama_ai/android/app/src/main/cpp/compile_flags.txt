@@ -1,0 +1,6 @@
+-I./llama.cpp/include
+-I./llama.cpp
+-I./llama.cpp/ggml/include
+--target=aarch64-linux-android
+-DANDROID
+-std=c++17

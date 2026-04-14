@@ -12,9 +12,6 @@ import '../widgets/shared_widgets.dart';
 import 'profile_setup_screen.dart';
 import 'model_manager_screen.dart';
 
-// NOTE: FFI (libllama_lib.so) must be called from the root isolate on Android.
-// We use Isolate.run() inside LLMService which handles this safely.
-
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
 
@@ -142,7 +139,15 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  // ─── FIX 1: release C++ model cache before switching ──────────────────────
+  // Previously this just saved the path. Now it tells libllama_lib.so to free
+  // the old g_model so the next runInference() loads the new file instead of
+  // reusing the stale cached model.
   Future<void> _setActiveModel(String path) async {
+    // Tell the native layer to free the currently cached model.
+    // Safe to call even on first launch (when nothing is cached yet).
+    LLMService.releaseModelCache();                        // ← ADDED
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('active_model_path', path);
     if (mounted) setState(() => _activeModelPath = path);
@@ -191,7 +196,9 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  // ── Send ──────────────────────────────────────────────────────────────────
+  // ─── FIX 2: _send() — added system prompt for better, complete answers ─────
+  // The original had no system instruction, so the model gave short/robotic
+  // replies. A one-line system prefix tells it to give full, helpful answers.
   Future<void> _send() async {
     final text = _ctrl.text.trim();
     if (text.isEmpty || _thinking) return;
@@ -221,7 +228,7 @@ class _ChatScreenState extends State<ChatScreen>
     ));
 
     final contextMsgs = await ChatStorage.lastMessages(_currentConvId!, 8);
-    final prompt      = _buildContextPrompt(contextMsgs, text);
+    final prompt      = _buildContextPrompt(contextMsgs, text); // uses updated builder
     final String modelPath = _activeModelPath!;
 
     try {
@@ -241,7 +248,6 @@ class _ChatScreenState extends State<ChatScreen>
         time:           aiMsg.time,
       ));
 
-      // Update title after first AI reply
       final conv = _conversations.firstWhere(
         (c) => c.id == _currentConvId,
         orElse: () => Conversation(
@@ -270,13 +276,30 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  // ─── FIX 3: system prompt prefix in context builder ───────────────────────
+  // Adds a one-line instruction before the conversation so the model knows
+  // its role. Without this, small models (TinyLlama, Phi-2) give very terse
+  // or incomplete answers because they have no instruction context.
   String _buildContextPrompt(List<StoredMessage> history, String input) {
-    if (history.isEmpty) return input;
     final buf = StringBuffer();
+
+    // System instruction — tells the model to give full, helpful answers.
+    // Keep it short: every token here costs context-window space.
+    buf.write(
+      'You are RAMA, a helpful AI assistant. '
+      'Give clear, complete, and accurate answers.\n\n',
+    );
+
+    // Conversation history (last 8 messages = ~4 turns)
     for (final msg in history) {
-      if (msg.role == 'user') buf.write('User: ${msg.text}\n');
-      else if (msg.role == 'ai') buf.write('Assistant: ${msg.text}\n');
+      if (msg.role == 'user') {
+        buf.write('User: ${msg.text}\n');
+      } else if (msg.role == 'ai') {
+        buf.write('Assistant: ${msg.text}\n');
+      }
     }
+
+    // Current turn
     buf.write('User: $input\nAssistant:');
     return buf.toString();
   }
@@ -354,8 +377,7 @@ class _ChatScreenState extends State<ChatScreen>
 
   String _modelLabel() {
     if (_activeModelPath == null) return 'No model loaded';
-    final fn = _activeModelPath!.split('/').last;
-    // strip .gguf, trim length
+    final fn   = _activeModelPath!.split('/').last;
     final name = fn.replaceAll('.gguf', '');
     return name.length > 28 ? '${name.substring(0, 26)}…' : name;
   }
@@ -368,7 +390,6 @@ class _ChatScreenState extends State<ChatScreen>
       body: SafeArea(
         child: Stack(
           children: [
-            // ── Main column ──────────────────────────────────────────────────
             Column(
               children: [
                 _buildAppBar(),
@@ -388,7 +409,6 @@ class _ChatScreenState extends State<ChatScreen>
               ],
             ),
 
-            // ── Sidebar overlay ──────────────────────────────────────────────
             if (_sidebarOpen) ...[
               FadeTransition(
                 opacity: _sidebarAnim,
@@ -425,15 +445,8 @@ class _ChatScreenState extends State<ChatScreen>
       ),
       child: Row(
         children: [
-          // Hamburger
-          _NavBtn(
-            icon:  Icons.menu_rounded,
-            color: _sub,
-            onTap: _toggleSidebar,
-          ),
+          _NavBtn(icon: Icons.menu_rounded, color: _sub, onTap: _toggleSidebar),
           const SizedBox(width: 8),
-
-          // Logo + title
           LogoBadge(size: 32, accent: _accent),
           const SizedBox(width: 9),
           Expanded(
@@ -441,32 +454,25 @@ class _ChatScreenState extends State<ChatScreen>
               mainAxisAlignment:  MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'RAMA AI',
-                  style: TextStyle(
-                    color:      _text,
-                    fontWeight: FontWeight.w800,
-                    fontSize:   14,
-                    letterSpacing: 0.8,
-                  ),
-                ),
+                Text('RAMA AI',
+                    style: TextStyle(
+                      color:         _text,
+                      fontWeight:    FontWeight.w800,
+                      fontSize:      14,
+                      letterSpacing: 0.8,
+                    )),
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 250),
                   child: Text(
                     _modelLabel(),
                     key:      ValueKey(_activeModelPath),
                     overflow: TextOverflow.ellipsis,
-                    style:    TextStyle(
-                      color:    _sub,
-                      fontSize: 10.5,
-                    ),
+                    style:    TextStyle(color: _sub, fontSize: 10.5),
                   ),
                 ),
               ],
             ),
           ),
-
-          // Status dot
           Container(
             width: 7, height: 7,
             margin: const EdgeInsets.only(right: 10),
@@ -482,18 +488,10 @@ class _ChatScreenState extends State<ChatScreen>
               ],
             ),
           ),
-
-          // New chat
-          _NavBtn(
-            icon:  Icons.edit_note_rounded,
-            color: _accent,
-            onTap: _startNewChat,
-          ),
+          _NavBtn(icon: Icons.edit_note_rounded, color: _accent, onTap: _startNewChat),
           const SizedBox(width: 4),
-
-          // Theme toggle
           _NavBtn(
-            icon:  appTheme.isDark
+            icon: appTheme.isDark
                 ? Icons.light_mode_outlined
                 : Icons.dark_mode_outlined,
             color: _sub,
@@ -502,21 +500,15 @@ class _ChatScreenState extends State<ChatScreen>
               final prefs = await SharedPreferences.getInstance();
               await prefs.setBool('theme_dark', appTheme.isDark);
               SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-                statusBarColor:
-                    Colors.transparent,
-                statusBarIconBrightness:
-                    appTheme.isDark ? Brightness.light : Brightness.dark,
+                statusBarColor:           Colors.transparent,
+                statusBarIconBrightness:  appTheme.isDark
+                    ? Brightness.light
+                    : Brightness.dark,
               ));
             },
           ),
           const SizedBox(width: 4),
-
-          // Models
-          _NavBtn(
-            icon:  Icons.grid_view_rounded,
-            color: _sub,
-            onTap: _openModelManager,
-          ),
+          _NavBtn(icon: Icons.grid_view_rounded, color: _sub, onTap: _openModelManager),
         ],
       ),
     );
@@ -531,7 +523,6 @@ class _ChatScreenState extends State<ChatScreen>
       color:  _surface,
       child: Column(
         children: [
-          // Header
           Container(
             padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
             decoration: BoxDecoration(
@@ -542,37 +533,26 @@ class _ChatScreenState extends State<ChatScreen>
                 LogoBadge(size: 30, accent: _accent),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    'Conversations',
-                    style: TextStyle(
-                      color:      _text,
-                      fontWeight: FontWeight.w700,
-                      fontSize:   15,
-                    ),
-                  ),
+                  child: Text('Conversations',
+                      style: TextStyle(
+                        color:      _text,
+                        fontWeight: FontWeight.w700,
+                        fontSize:   15,
+                      )),
                 ),
-                _NavBtn(
-                  icon:  Icons.close_rounded,
-                  color: _sub,
-                  onTap: _closeSidebar,
-                ),
+                _NavBtn(icon: Icons.close_rounded, color: _sub, onTap: _closeSidebar),
               ],
             ),
           ),
-
-          // New chat button
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
             child: _GradientButton(
-              label: '+ New Chat',
+              label:  '+ New Chat',
               accent: _accent,
               onTap:  _startNewChat,
             ),
           ),
-
           RamaDivider(color: _border),
-
-          // Conversation list
           Expanded(
             child: _historyLoading
                 ? Center(child: CircularProgressIndicator(
@@ -587,8 +567,6 @@ class _ChatScreenState extends State<ChatScreen>
                             _conversationTile(_conversations[i]),
                       ),
           ),
-
-          // User row
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -601,7 +579,8 @@ class _ChatScreenState extends State<ChatScreen>
                   decoration: BoxDecoration(
                     color:        _accent.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
-                    border:       Border.all(color: _accent.withValues(alpha: 0.30)),
+                    border:       Border.all(
+                        color: _accent.withValues(alpha: 0.30)),
                   ),
                   child: Center(
                     child: Text(
@@ -645,8 +624,7 @@ class _ChatScreenState extends State<ChatScreen>
         children: [
           Icon(Icons.chat_bubble_outline_rounded, color: _dim, size: 34),
           const SizedBox(height: 10),
-          Text('No chats yet',
-              style: TextStyle(color: _sub, fontSize: 13)),
+          Text('No chats yet', style: TextStyle(color: _sub, fontSize: 13)),
           const SizedBox(height: 4),
           Text('Start your first conversation!',
               style: TextStyle(color: _dim, fontSize: 11)),
@@ -698,7 +676,9 @@ class _ChatScreenState extends State<ChatScreen>
                         title,
                         style: TextStyle(
                           color:      isActive ? _accent : _text,
-                          fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                          fontWeight: isActive
+                              ? FontWeight.w600
+                              : FontWeight.w400,
                           fontSize:   13,
                         ),
                         maxLines: 1,
@@ -728,8 +708,8 @@ class _ChatScreenState extends State<ChatScreen>
 
   Future<void> _confirmDelete(Conversation conv) async {
     final ok = await showModalBottomSheet<bool>(
-      context:           context,
-      backgroundColor:   _card,
+      context:         context,
+      backgroundColor: _card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -750,14 +730,12 @@ class _ChatScreenState extends State<ChatScreen>
               Icon(Icons.delete_forever_rounded,
                   color: RamaColors.error, size: 36),
               const SizedBox(height: 12),
-              Text(
-                'Delete this chat?',
-                style: TextStyle(
-                  color:      _text,
-                  fontWeight: FontWeight.w700,
-                  fontSize:   16,
-                ),
-              ),
+              Text('Delete this chat?',
+                  style: TextStyle(
+                    color:      _text,
+                    fontWeight: FontWeight.w700,
+                    fontSize:   16,
+                  )),
               const SizedBox(height: 6),
               Text(
                 '"${conv.title.isEmpty ? 'New Chat' : conv.title}"\nThis cannot be undone.',
@@ -769,9 +747,9 @@ class _ChatScreenState extends State<ChatScreen>
                 children: [
                   Expanded(
                     child: _OutlineBtn(
-                      label: 'Cancel',
-                      onTap: () => Navigator.pop(ctx, false),
-                      color: _sub,
+                      label:  'Cancel',
+                      onTap:  () => Navigator.pop(ctx, false),
+                      color:  _sub,
                       border: _border,
                     ),
                   ),
@@ -799,7 +777,6 @@ class _ChatScreenState extends State<ChatScreen>
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
       child: Column(
         children: [
-          // Logo + glow
           Stack(
             alignment: Alignment.center,
             children: [
@@ -807,22 +784,18 @@ class _ChatScreenState extends State<ChatScreen>
                 width: 100, height: 100,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      _accent.withValues(alpha: 0.15),
-                      Colors.transparent,
-                    ],
-                  ),
+                  gradient: RadialGradient(colors: [
+                    _accent.withValues(alpha: 0.15),
+                    Colors.transparent,
+                  ]),
                 ),
               ),
               LogoBadge(size: 68, accent: _accent),
             ],
           ),
           const SizedBox(height: 20),
-
-          // Greeting
           Text(
-            '$_greeting, $_userName $_kAvatarEmojis[${_userAvatar.clamp(0, 7)}]',
+            '$_greeting, $_userName ${_kAvatarEmojis[_userAvatar.clamp(0, 7)]}',
             style: TextStyle(
               color:      _text,
               fontSize:   22,
@@ -835,7 +808,7 @@ class _ChatScreenState extends State<ChatScreen>
             _activeModelPath != null
                 ? "I'm ready to help — what's on your mind?"
                 : 'Load a model to start chatting',
-            style: TextStyle(color: _sub, fontSize: 14),
+            style:     TextStyle(color: _sub, fontSize: 14),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 28),
@@ -857,7 +830,6 @@ class _ChatScreenState extends State<ChatScreen>
               onTap:    _openModelManager,
             ),
           ] else ...[
-            // Active model chip
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
@@ -882,40 +854,33 @@ class _ChatScreenState extends State<ChatScreen>
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    _modelLabel(),
-                    style: TextStyle(
-                      color:      _accent,
-                      fontSize:   12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  Text(_modelLabel(),
+                      style: TextStyle(
+                        color:      _accent,
+                        fontSize:   12,
+                        fontWeight: FontWeight.w600,
+                      )),
                 ],
               ),
             ),
             const SizedBox(height: 28),
-
-            // Suggestion label
             Row(
               children: [
                 Expanded(child: RamaDivider(color: _border)),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text(
-                    'TRY ASKING',
-                    style: TextStyle(
-                      color:         _dim,
-                      fontSize:      10,
-                      fontWeight:    FontWeight.w700,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
+                  child: Text('TRY ASKING',
+                      style: TextStyle(
+                        color:         _dim,
+                        fontSize:      10,
+                        fontWeight:    FontWeight.w700,
+                        letterSpacing: 1.2,
+                      )),
                 ),
                 Expanded(child: RamaDivider(color: _border)),
               ],
             ),
             const SizedBox(height: 14),
-
             ..._kSuggestions.map((s) => SuggestionChip(
               label:  s,
               card:   _card,
@@ -969,7 +934,7 @@ class _ChatScreenState extends State<ChatScreen>
           const SizedBox(width: 10),
           AnimatedBuilder(
             animation: _dotCtrl,
-            builder: (_, __) => Row(
+            builder: (context, _) => Row(
               mainAxisSize: MainAxisSize.min,
               children: List.generate(3, (i) {
                 final phase   = ((_dotCtrl.value * 3) - i) % 3;
@@ -989,8 +954,7 @@ class _ChatScreenState extends State<ChatScreen>
             ),
           ),
           const SizedBox(width: 10),
-          Text('Generating…',
-              style: TextStyle(color: _sub, fontSize: 12)),
+          Text('Generating…', style: TextStyle(color: _sub, fontSize: 12)),
         ],
       ),
     );
@@ -1030,7 +994,8 @@ class _ChatScreenState extends State<ChatScreen>
               child: TextField(
                 controller:      _ctrl,
                 focusNode:       _focus,
-                style:           TextStyle(color: _text, fontSize: 14.5, height: 1.45),
+                style:           TextStyle(
+                    color: _text, fontSize: 14.5, height: 1.45),
                 maxLines:        null,
                 keyboardType:    TextInputType.multiline,
                 textInputAction: TextInputAction.newline,
@@ -1068,10 +1033,11 @@ class _ChatScreenState extends State<ChatScreen>
           activeModelPath: _activeModelPath,
           onModelSelected: _setActiveModel,
         ),
-        transitionsBuilder: (_, anim, __, child) => SlideTransition(
+        transitionsBuilder: (context, anim, _, child) => SlideTransition(
           position: Tween<Offset>(
             begin: const Offset(0, 1), end: Offset.zero,
-          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+          ).animate(
+              CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
           child: child,
         ),
         transitionDuration: const Duration(milliseconds: 320),
@@ -1084,10 +1050,11 @@ class _ChatScreenState extends State<ChatScreen>
       context,
       PageRouteBuilder(
         pageBuilder: (_, a1, a2) => const ProfileSetupScreen(),
-        transitionsBuilder: (_, anim, __, child) => SlideTransition(
+        transitionsBuilder: (context, anim, _, child) => SlideTransition(
           position: Tween<Offset>(
             begin: const Offset(0, 1), end: Offset.zero,
-          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+          ).animate(
+              CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
           child: child,
         ),
         transitionDuration: const Duration(milliseconds: 320),
@@ -1135,7 +1102,8 @@ class _GradientButton extends StatelessWidget {
   final String       label;
   final Color        accent;
   final VoidCallback onTap;
-  const _GradientButton({required this.label, required this.accent, required this.onTap});
+  const _GradientButton(
+      {required this.label, required this.accent, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1147,8 +1115,8 @@ class _GradientButton extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [accent, accent.withValues(alpha: 0.75)],
-            begin: Alignment.topLeft,
-            end:   Alignment.bottomRight,
+            begin:  Alignment.topLeft,
+            end:    Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
@@ -1177,7 +1145,8 @@ class _FilledBtn extends StatelessWidget {
   final String       label;
   final Color        color;
   final VoidCallback onTap;
-  const _FilledBtn({required this.label, required this.color, required this.onTap});
+  const _FilledBtn(
+      {required this.label, required this.color, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
