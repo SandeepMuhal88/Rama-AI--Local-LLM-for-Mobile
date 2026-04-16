@@ -91,6 +91,10 @@ extern "C" {
 // ─────────────────────────────────────────────────────────────────────────────
 const char *run_model_path(const char *model_path, const char *prompt) {
 
+  // Backend must be initialised before any llama API call.
+  // Safe to call multiple times — it's idempotent.
+  llama_backend_init();
+
   // ── 1. Model (cached) ────────────────────────────────────────────────────
   llama_model *model = get_or_load_model(model_path);
   if (!model) {
@@ -195,15 +199,17 @@ const char *run_model_path(const char *model_path, const char *prompt) {
   std::string output;
   output.reserve(2048);
 
-  int cur_pos = n_tokens;
   bool gen_ok = true;
 
   for (int i = 0; i < K_MAX_GEN; i++) {
     llama_token tok = llama_sampler_sample(sampler, ctx, -1);
 
-    // EOS or invalid token → done
-    if (tok == llama_vocab_eos(vocab) || tok < 0) {
-      LOGI("EOS reached at generation step %d", i);
+    // llama_vocab_is_eog() checks ALL end-of-generation tokens:
+    // EOS, EOT (<|eot_id|> in Llama-3), and any model-specific stop tokens.
+    // Using llama_vocab_eos() alone misses these → model keeps generating
+    // garbage after the real stop token → short/truncated output.
+    if (llama_vocab_is_eog(vocab, tok)) {
+      LOGI("EOG token at step %d", i);
       break;
     }
 
@@ -214,19 +220,13 @@ const char *run_model_path(const char *model_path, const char *prompt) {
     if (nc > 0)
       output.append(buf, (size_t)nc);
 
-    // Feed generated token back for next step
-    llama_batch nb = llama_batch_init(1, 0, 1);
-    nb.n_tokens = 1;
-    nb.token[0] = tok;
-    nb.pos[0] = cur_pos++;
-    nb.n_seq_id[0] = 1;
-    nb.seq_id[0][0] = 0;
-    nb.logits[0] = true;
+    // Feed generated token back for next step.
+    // llama_batch_get_one() returns pos=nullptr — the context tracks the
+    // absolute position automatically via its KV-cache (n_past counter).
+    // DO NOT write to nb.pos[]: it is NULL and will cause a SIGSEGV crash.
+    llama_batch nb = llama_batch_get_one(&tok, 1);
 
-    bool step_ok = (llama_decode(ctx, nb) == 0);
-    llama_batch_free(nb);
-
-    if (!step_ok) {
+    if (llama_decode(ctx, nb) != 0) {
       LOGE("Generation decode failed at step %d", i);
       gen_ok = false;
       break;

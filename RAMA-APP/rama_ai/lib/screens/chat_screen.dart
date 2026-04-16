@@ -59,6 +59,71 @@ class _ChatScreenState extends State<ChatScreen>
     'Summarize the history of AI',
   ];
 
+  // ── Instant preset replies (no LLM call needed) ───────────────────────────
+  // Key   : regex pattern matched against the trimmed, lowercased user message.
+  // Value : reply string. Use {{name}} as placeholder for the user's first name.
+  //
+  // Why: greetings / small-talk require 2-18 s of LLM inference for zero gain.
+  //      Intercepting them here gives a sub-50 ms response.
+  static final _kPresetReplies = <RegExp, List<String>>{
+    // Greetings
+    RegExp(r'^h+e+l+o+[!?.]*$'):        ['Hey there, {{name}}! 👋 How can I help you today?',
+                                          'Hello, {{name}}! 😊 What can I do for you?',
+                                          'Hi {{name}}! Great to see you. What\'s on your mind?'],
+    RegExp(r'^h+i+[!?.]*$'):             ['Hey {{name}}! 👋 How can I help?',
+                                          'Hi there! What can I do for you today? 😊',
+                                          'Hello! I\'m RAMA, your offline AI. Ask me anything!'],
+    RegExp(r'^hey+[!?.]*$'):             ['Hey {{name}}! 👋 What\'s up?',
+                                          'Hey! Ready to help. What\'s on your mind?'],
+    // What's up / sup
+    RegExp(r"^what'?s?\s+up[!?.]*$"):   ['Not much! Just waiting for your questions. 😄',
+                                          'All good here! What can I help you with, {{name}}?'],
+    RegExp(r'^sup[!?.]*$'):              ['Hey! What can I do for you? 😊',
+                                          'Hey {{name}}! 👋 What are you thinking about?'],
+    // How are you
+    RegExp(r"^how\s+are\s+(you|u)[!?.]*$"):
+                                         ['I\'m doing great, thanks for asking, {{name}}! 😊 How about you?',
+                                          'Feeling sharp and ready to help! What\'s on your mind?'],
+    RegExp(r"^how'?s?\s+(it\s+going|things?)[!?.]*$"):
+                                         ['Going well! Ready to assist you, {{name}}. What do you need?',
+                                          'All systems running smoothly! Ask me anything. 🚀'],
+    // Good morning / evening / night
+    RegExp(r'^good\s+morning[!?.]*$'):   ['Good morning, {{name}}! ☀️ Hope you have a great day. How can I help?'],
+    RegExp(r'^good\s+afternoon[!?.]*$'): ['Good afternoon, {{name}}! ☀️ What can I do for you?'],
+    RegExp(r'^good\s+evening[!?.]*$'):   ['Good evening, {{name}}! 🌙 What\'s on your mind?'],
+    RegExp(r'^good\s+night[!?.]*$'):     ['Good night, {{name}}! 🌙 Sleep well. See you tomorrow!'],
+    // Thanks
+    RegExp(r'^th?a+nk(s| you)[!?.]*$'): ['You\'re welcome, {{name}}! 😊 Anything else I can help with?',
+                                          'Happy to help! Let me know if you need anything else.'],
+    RegExp(r'^(ok|okay|k|got it|noted)[!?.]*$'):
+                                         ['Great! Let me know when you\'re ready. 😊',
+                                          'Sounds good! I\'m here whenever you need me.'],
+    // Bye
+    RegExp(r'^(bye|goodbye|see\s+you|cya)[!?.]*$'):
+                                         ['Goodbye, {{name}}! 👋 Come back anytime.',
+                                          'See you later! Take care 😊'],
+    // Who are you
+    RegExp(r'^who\s+are\s+you[!?.]*$'):
+                                         ['I\'m RAMA — your 100% offline AI assistant! 🤖 I run entirely on your device with no internet needed. Ask me anything!'],
+    RegExp(r'^what\s+(can\s+you|do\s+you)\s+do[!?.]*$'):
+                                         ['I can answer questions, explain concepts, write code, summarise text, and much more — all 100% offline! 🚀 What would you like to explore?'],
+  };
+
+  // Returns a preset reply string if the message matches, or null otherwise.
+  // Picks a random variant so repeated greetings feel less robotic.
+  String? _instantReply(String text) {
+    final lower = text.toLowerCase().trim();
+    for (final entry in _kPresetReplies.entries) {
+      if (entry.key.hasMatch(lower)) {
+        final variants = entry.value;
+        final pick     = variants[DateTime.now().millisecond % variants.length];
+        final name     = _userName.isEmpty ? 'friend' : _userName.split(' ').first;
+        return pick.replaceAll('{{name}}', name);
+      }
+    }
+    return null;
+  }
+
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   @override
   void initState() {
@@ -101,6 +166,9 @@ class _ChatScreenState extends State<ChatScreen>
     await Future.wait([
       _loadProfile(),
       _loadSavedModel(),
+      // Pre-warm the background inference isolate now so that the first
+      // message doesn't pay the isolate-spawn cost (~150ms).
+      LLMService.ensureIsolate().catchError((_) {}),
     ]);
     await _refreshModels();
     await _loadConversations();
@@ -139,14 +207,10 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  // ─── FIX 1: release C++ model cache before switching ──────────────────────
-  // Previously this just saved the path. Now it tells libllama_lib.so to free
-  // the old g_model so the next runInference() loads the new file instead of
-  // reusing the stale cached model.
   Future<void> _setActiveModel(String path) async {
-    // Tell the native layer to free the currently cached model.
-    // Safe to call even on first launch (when nothing is cached yet).
-    LLMService.releaseModelCache();                        // ← ADDED
+    // Tell the native layer to free the currently cached model so the next
+    // runInference() loads the new file instead of reusing the stale one.
+    await LLMService.releaseModelCache();
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('active_model_path', path);
@@ -227,41 +291,25 @@ class _ChatScreenState extends State<ChatScreen>
       time:           userMsg.time,
     ));
 
+    // ── Instant reply check (skip LLM for greetings / small-talk) ────────────
+    // Runs in < 1 ms. If matched, we post the reply immediately and return —
+    // no model inference needed, no waiting.
+    final preset = _instantReply(text);
+    if (preset != null) {
+      await _postReply(preset, text);
+      return;
+    }
+
+    // ── Full LLM inference ────────────────────────────────────────────────────
     final contextMsgs = await ChatStorage.lastMessages(_currentConvId!, 8);
-    final prompt      = _buildContextPrompt(contextMsgs, text); // uses updated builder
+    final prompt      = _buildContextPrompt(contextMsgs, text);
     final String modelPath = _activeModelPath!;
 
     try {
       final raw   = await LLMService.runInference(modelPath, prompt);
       final reply = cleanLLMResponse(raw);
-
       if (!mounted) return;
-      final role  = reply.startsWith('Error:') ? MessageRole.error : MessageRole.ai;
-      final aiMsg = ChatMessage(role, reply);
-      setState(() { _messages.add(aiMsg); _thinking = false; });
-      _scrollToBottom();
-
-      await ChatStorage.insertMessage(StoredMessage(
-        conversationId: _currentConvId!,
-        role:           role == MessageRole.error ? 'error' : 'ai',
-        text:           reply,
-        time:           aiMsg.time,
-      ));
-
-      final conv = _conversations.firstWhere(
-        (c) => c.id == _currentConvId,
-        orElse: () => Conversation(
-          id: _currentConvId, title: '', createdAt: DateTime.now(), updatedAt: DateTime.now(),
-        ),
-      );
-      if (conv.title.isEmpty || conv.title == 'New Chat') {
-        await ChatStorage.updateTitle(
-          _currentConvId!,
-          text.length > 40 ? '${text.substring(0, 38)}…' : text,
-        );
-      }
-      await _loadConversations();
-
+      await _postReply(reply, text);
     } catch (e) {
       if (!mounted) return;
       final errMsg = ChatMessage(MessageRole.error, 'Error: $e');
@@ -274,6 +322,36 @@ class _ChatScreenState extends State<ChatScreen>
       ));
       _scrollToBottom();
     }
+  }
+
+  // ── Shared helper: post an AI reply, save to DB, update conv title ─────────
+  Future<void> _postReply(String reply, String userText) async {
+    final role  = reply.startsWith('Error:') ? MessageRole.error : MessageRole.ai;
+    final aiMsg = ChatMessage(role, reply);
+    setState(() { _messages.add(aiMsg); _thinking = false; });
+    _scrollToBottom();
+
+    await ChatStorage.insertMessage(StoredMessage(
+      conversationId: _currentConvId!,
+      role:           role == MessageRole.error ? 'error' : 'ai',
+      text:           reply,
+      time:           aiMsg.time,
+    ));
+
+    final conv = _conversations.firstWhere(
+      (c) => c.id == _currentConvId,
+      orElse: () => Conversation(
+        id: _currentConvId, title: '',
+        createdAt: DateTime.now(), updatedAt: DateTime.now(),
+      ),
+    );
+    if (conv.title.isEmpty || conv.title == 'New Chat') {
+      await ChatStorage.updateTitle(
+        _currentConvId!,
+        userText.length > 40 ? '${userText.substring(0, 38)}…' : userText,
+      );
+    }
+    await _loadConversations();
   }
 
   // ─── FIX 3: system prompt prefix in context builder ───────────────────────

@@ -1,6 +1,12 @@
 -I./llama.cpp/include
 -I./llama.cpp
 -I./llama.cpp/ggml/include
---target=aarch64-linux-android
+-I./llama.cpp/ggml/src
+-isystemC:/Users/sande/AppData/Local/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include
+-isystemC:/Users/sande/AppData/Local/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/aarch64-linux-android
+-isystemC:/Users/sande/AppData/Local/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/18/include
+--target=aarch64-linux-android35
 -DANDROID
+-D__ANDROID_API__=35
+-D__ANDROID__
 -std=c++17
