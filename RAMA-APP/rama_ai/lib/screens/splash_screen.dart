@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../core/app_theme.dart';
 import 'entry_point.dart';
 
+// ─── Phase 1: Opening Sequence ────────────────────────────────────────────────
+// Fluid 1.5-second intro: fade-in scale-up logo → text reveal → crossfade.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -11,22 +14,23 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with TickerProviderStateMixin {
-  // Logo pop-in
+  // ── Phase 1: Logo entrance (0ms → 600ms) ─────────────────────────────────
   late final AnimationController _logoCtrl;
   late final Animation<double>   _logoScale;
   late final Animation<double>   _logoFade;
 
-  // Text fade+slide
+  // ── Phase 2: Text reveal (350ms → 900ms) ──────────────────────────────────
   late final AnimationController _textCtrl;
   late final Animation<double>   _textFade;
   late final Animation<Offset>   _textSlide;
 
-  // Tagline fade
+  // ── Phase 3: Tagline (600ms → 1000ms) ────────────────────────────────────
   late final AnimationController _tagCtrl;
   late final Animation<double>   _tagFade;
 
-  // Dots fade
-  late final AnimationController _dotsCtrl;
+  // ── Ambient pulse ─────────────────────────────────────────────────────────
+  late final AnimationController _pulseCtrl;
+  late final Animation<double>   _pulseAnim;
 
   @override
   void initState() {
@@ -34,51 +38,63 @@ class _SplashScreenState extends State<SplashScreen>
 
     _logoCtrl = AnimationController(
       vsync:    this,
-      duration: const Duration(milliseconds: 750),
+      duration: const Duration(milliseconds: 600),
     );
-    _logoScale = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _logoCtrl, curve: Curves.elasticOut));
-    _logoFade = CurvedAnimation(parent: _logoCtrl, curve: Curves.easeOut);
+    // Curves.easeInOutCubic as specified in requirements
+    _logoScale = Tween<double>(begin: 0.6, end: 1.0).animate(
+      CurvedAnimation(parent: _logoCtrl, curve: Curves.easeInOutCubic),
+    );
+    _logoFade = CurvedAnimation(parent: _logoCtrl, curve: Curves.easeInOutCubic);
 
     _textCtrl = AnimationController(
       vsync:    this,
-      duration: const Duration(milliseconds: 550),
+      duration: const Duration(milliseconds: 500),
     );
-    _textFade  = CurvedAnimation(parent: _textCtrl, curve: Curves.easeOut);
+    _textFade  = CurvedAnimation(parent: _textCtrl, curve: Curves.easeInOutCubic);
     _textSlide = Tween<Offset>(
-      begin: const Offset(0, 0.25),
+      begin: const Offset(0, 0.3),
       end:   Offset.zero,
-    ).animate(CurvedAnimation(parent: _textCtrl, curve: Curves.easeOutCubic));
+    ).animate(CurvedAnimation(parent: _textCtrl, curve: Curves.easeInOutCubic));
 
     _tagCtrl = AnimationController(
       vsync:    this,
-      duration: const Duration(milliseconds: 450),
+      duration: const Duration(milliseconds: 400),
     );
-    _tagFade = CurvedAnimation(parent: _tagCtrl, curve: Curves.easeOut);
+    _tagFade = CurvedAnimation(parent: _tagCtrl, curve: Curves.easeInOutCubic);
 
-    _dotsCtrl = AnimationController(
+    _pulseCtrl = AnimationController(
       vsync:    this,
-      duration: const Duration(milliseconds: 900),
-    )..repeat();
+      duration: const Duration(milliseconds: 2000),
+    )..repeat(reverse: true);
+    _pulseAnim = CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut);
 
-    _run();
+    _runSequence();
   }
 
-  Future<void> _run() async {
-    await Future<void>.delayed(const Duration(milliseconds: 180));
-    _logoCtrl.forward();
-    await Future<void>.delayed(const Duration(milliseconds: 380));
-    _textCtrl.forward();
-    await Future<void>.delayed(const Duration(milliseconds: 280));
-    _tagCtrl.forward();
-    await Future<void>.delayed(const Duration(milliseconds: 950));
+  // ── Precisely timed 1.5-second sequence ───────────────────────────────────
+  Future<void> _runSequence() async {
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    _logoCtrl.forward();                                           // 0 → 600ms
+
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    _textCtrl.forward();                                           // 350 → 850ms
+
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    _tagCtrl.forward();                                            // 600 → 1000ms
+
+    // Total visible time: 1500ms from first frame
+    await Future<void>.delayed(const Duration(milliseconds: 650));
     if (!mounted) return;
+
+    // Crossfade to main workspace
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        pageBuilder:    (_, a1, a2) => const EntryPoint(),
-        transitionsBuilder: (context, anim, _, child) =>
-            FadeTransition(opacity: anim, child: child),
-        transitionDuration: const Duration(milliseconds: 500),
+        pageBuilder:        (_, a1, a2) => const EntryPoint(),
+        transitionsBuilder: (context, anim, _, child) => FadeTransition(
+          opacity: CurvedAnimation(parent: anim, curve: Curves.easeInOutCubic),
+          child:   child,
+        ),
+        transitionDuration: const Duration(milliseconds: 600),
       ),
     );
   }
@@ -88,57 +104,72 @@ class _SplashScreenState extends State<SplashScreen>
     _logoCtrl.dispose();
     _textCtrl.dispose();
     _tagCtrl.dispose();
-    _dotsCtrl.dispose();
+    _pulseCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final accent   = appTheme.accent;
-    final isDark   = appTheme.isDark;
-    final bg       = isDark ? RamaColors.darkBg      : RamaColors.lightBg;
-    final textCol  = isDark ? RamaColors.darkText     : RamaColors.lightText;
-    final subCol   = isDark ? RamaColors.darkTextSub  : RamaColors.lightTextSub;
+    final accent  = appTheme.accent;
+    final isDark  = appTheme.isDark;
+    final bg      = isDark ? RamaColors.darkBg     : RamaColors.lightBg;
+    final textCol = isDark ? RamaColors.darkText    : RamaColors.lightText;
+    final subCol  = isDark ? RamaColors.darkTextSub : RamaColors.lightTextSub;
 
     return Scaffold(
       backgroundColor: bg,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ── Ambient glows ──────────────────────────────────────────────────
-          Positioned(
-            top: -120, left: -100,
-            child: _Glow(color: accent, size: 360, alpha: 0.18),
-          ),
-          Positioned(
-            bottom: -100, right: -80,
-            child: _Glow(color: accent, size: 280, alpha: 0.12),
+          // ── Ambient pulse glow ────────────────────────────────────────────
+          AnimatedBuilder(
+            animation: _pulseAnim,
+            builder: (_, __) => Stack(
+              children: [
+                Positioned(
+                  top: -120, left: -100,
+                  child: _GlowCircle(
+                    color: accent,
+                    size:  380,
+                    alpha: 0.08 + _pulseAnim.value * 0.06,
+                  ),
+                ),
+                Positioned(
+                  bottom: -120, right: -80,
+                  child: _GlowCircle(
+                    color: accent,
+                    size:  300,
+                    alpha: 0.05 + _pulseAnim.value * 0.05,
+                  ),
+                ),
+              ],
+            ),
           ),
 
-          // ── Centre content ─────────────────────────────────────────────────
+          // ── Centre content ────────────────────────────────────────────────
           Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Logo
+                // ── Logo badge ─────────────────────────────────────────────
                 ScaleTransition(
                   scale: _logoScale,
                   child: FadeTransition(
                     opacity: _logoFade,
                     child: Container(
-                      width: 92, height: 92,
+                      width: 96, height: 96,
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [accent, accent.withValues(alpha: 0.62)],
+                          colors: [accent, accent.withValues(alpha: 0.70)],
                           begin: Alignment.topLeft,
                           end:   Alignment.bottomRight,
                         ),
-                        borderRadius: BorderRadius.circular(26),
+                        borderRadius: BorderRadius.circular(28),
                         boxShadow: [
                           BoxShadow(
-                            color:      accent.withValues(alpha: 0.42),
-                            blurRadius: 42,
-                            offset:     const Offset(0, 12),
+                            color:      accent.withValues(alpha: 0.40),
+                            blurRadius: 48,
+                            offset:     const Offset(0, 16),
                           ),
                         ],
                       ),
@@ -150,59 +181,60 @@ class _SplashScreenState extends State<SplashScreen>
                     ),
                   ),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 32),
 
-                // RAMA AI title
+                // ── RAMA AI title ──────────────────────────────────────────
                 FadeTransition(
                   opacity: _textFade,
                   child: SlideTransition(
                     position: _textSlide,
                     child: Text(
                       'RAMA AI',
-                      style: TextStyle(
+                      style: GoogleFonts.inter(
                         color:         textCol,
                         fontSize:      34,
-                        fontWeight:    FontWeight.w900,
-                        letterSpacing: 7,
+                        fontWeight:    FontWeight.w800,
+                        letterSpacing: 5,
                       ),
                     ),
                   ),
                 ),
                 const SizedBox(height: 10),
 
-                // Tagline
+                // ── Tagline ────────────────────────────────────────────────
                 FadeTransition(
                   opacity: _tagFade,
                   child: Text(
                     'Your 100% offline AI assistant',
-                    style: TextStyle(
-                      color:      subCol,
-                      fontSize:   14,
-                      letterSpacing: 0.4,
+                    style: GoogleFonts.inter(
+                      color:         subCol,
+                      fontSize:      14,
+                      fontWeight:    FontWeight.w400,
+                      letterSpacing: 0.3,
                     ),
                   ),
                 ),
-                const SizedBox(height: 50),
+                const SizedBox(height: 56),
 
-                // Dots
+                // ── Subtle loading dots ────────────────────────────────────
                 FadeTransition(
                   opacity: _tagFade,
                   child: AnimatedBuilder(
-                    animation: _dotsCtrl,
-                    builder: (context, _) => Row(
+                    animation: _pulseCtrl,
+                    builder: (_, __) => Row(
                       mainAxisSize: MainAxisSize.min,
                       children: List.generate(3, (i) {
-                        final phase   = ((_dotsCtrl.value * 3) - i) % 3;
+                        final phase   = ((_pulseCtrl.value * 3) - i) % 3;
                         final opacity = phase < 1
                             ? phase
                             : (phase < 2 ? 1.0 : 3.0 - phase);
                         return Container(
                           margin: const EdgeInsets.symmetric(horizontal: 3),
-                          width: 7, height: 7,
+                          width: 6, height: 6,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: accent.withValues(
-                                alpha: 0.25 + opacity.clamp(0.0, 1.0) * 0.75),
+                                alpha: 0.20 + opacity.clamp(0.0, 1.0) * 0.60),
                           ),
                         );
                       }),
@@ -218,11 +250,12 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-class _Glow extends StatelessWidget {
+// ─── Ambient glow helper ──────────────────────────────────────────────────────
+class _GlowCircle extends StatelessWidget {
   final Color  color;
   final double size;
   final double alpha;
-  const _Glow({required this.color, required this.size, required this.alpha});
+  const _GlowCircle({required this.color, required this.size, required this.alpha});
 
   @override
   Widget build(BuildContext context) {

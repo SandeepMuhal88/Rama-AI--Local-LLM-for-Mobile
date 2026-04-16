@@ -1,44 +1,49 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-// ─── Accent presets ───────────────────────────────────────────────────────────
+// ─── Claude-inspired Accent Presets ───────────────────────────────────────────
 const List<Color> kAccentPresets = [
-  Color(0xFF7C6EF5), // Indigo (default)
+  Color(0xFFDA7756), // Claude Orange/Peach (default)
+  Color(0xFF7C6EF5), // Indigo
   Color(0xFF3B82F6), // Blue
   Color(0xFF06B6D4), // Cyan
   Color(0xFF10B981), // Emerald
   Color(0xFFF59E0B), // Amber
-  Color(0xFFEF4444), // Red
   Color(0xFFEC4899), // Pink
   Color(0xFF8B5CF6), // Violet
 ];
 
 // ─── Color tokens ─────────────────────────────────────────────────────────────
 class RamaColors {
-  // Dark palette — true OLED black base
-  static const darkBg       = Color(0xFF000000);
-  static const darkSurface  = Color(0xFF0A0A0A);
-  static const darkCard     = Color(0xFF111111);
-  static const darkElevated = Color(0xFF1A1A1A);
-  static const darkBorder   = Color(0xFF222222);
-  static const darkBorder2  = Color(0xFF2A2A2A);
-  static const darkText     = Color(0xFFFFFFFF);
+  // Dark palette — Claude AI inspired
+  static const darkBg       = Color(0xFF121212);
+  static const darkSurface  = Color(0xFF1A1A1A);
+  static const darkCard     = Color(0xFF1E1E1E);
+  static const darkElevated = Color(0xFF242424);
+  static const darkBorder   = Color(0xFF2A2A2A);
+  static const darkBorder2  = Color(0xFF333333);
+  static const darkText     = Color(0xFFE0E0E0);
   static const darkTextSub  = Color(0xFF8A8A8A);
   static const darkTextDim  = Color(0xFF3A3A3A);
 
   // Light palette
-  static const lightBg       = Color(0xFFF7F7F7);
+  static const lightBg       = Color(0xFFF8F7F5);
   static const lightSurface  = Color(0xFFFFFFFF);
-  static const lightCard     = Color(0xFFF0F0F0);
-  static const lightElevated = Color(0xFFE8E8E8);
-  static const lightBorder   = Color(0xFFE0E0E0);
-  static const lightBorder2  = Color(0xFFD0D0D0);
-  static const lightText     = Color(0xFF0A0A0A);
+  static const lightCard     = Color(0xFFF3F2EF);
+  static const lightElevated = Color(0xFFEAE9E6);
+  static const lightBorder   = Color(0xFFE0DDD8);
+  static const lightBorder2  = Color(0xFFD0CEC9);
+  static const lightText     = Color(0xFF1A1A1A);
   static const lightTextSub  = Color(0xFF666666);
   static const lightTextDim  = Color(0xFFAAAAAA);
 
   static const error   = Color(0xFFEF4444);
   static const success = Color(0xFF10B981);
   static const warning = Color(0xFFF59E0B);
+
+  // Claude accent shades
+  static const claudeOrange = Color(0xFFDA7756);
+  static const claudeOrangeSoft = Color(0xFFF0A882);
 }
 
 // ─── AppTheme ─────────────────────────────────────────────────────────────────
@@ -46,7 +51,7 @@ class AppTheme extends ChangeNotifier {
   bool  _isDark;
   Color _accent;
 
-  AppTheme({bool isDark = true, Color accent = const Color(0xFF7C6EF5)})
+  AppTheme({bool isDark = true, Color accent = RamaColors.claudeOrange})
       : _isDark = isDark,
         _accent = accent;
 
@@ -76,42 +81,89 @@ class AppTheme extends ChangeNotifier {
 
   ThemeData get themeData => _isDark ? _dark : _light;
 
+  TextTheme _textTheme(Color textColor) => GoogleFonts.interTextTheme().apply(
+        bodyColor: textColor,
+        displayColor: textColor,
+      );
+
   ThemeData get _dark => ThemeData(
     brightness:             Brightness.dark,
     scaffoldBackgroundColor: RamaColors.darkBg,
     useMaterial3:           true,
-    fontFamily:             'sans-serif',
+    textTheme:              _textTheme(RamaColors.darkText),
     colorScheme: ColorScheme.dark(
-      primary: _accent,
-      surface: RamaColors.darkSurface,
+      primary:   _accent,
+      surface:   RamaColors.darkSurface,
       onSurface: RamaColors.darkText,
     ),
     textSelectionTheme: TextSelectionThemeData(
-      cursorColor:         _accent,
-      selectionColor:      _accent.withValues(alpha: 0.30),
+      cursorColor:          _accent,
+      selectionColor:       _accent.withValues(alpha: 0.30),
       selectionHandleColor: _accent,
     ),
-    splashColor: _accent.withValues(alpha: 0.08),
-    highlightColor: Colors.transparent,
+    splashColor:     _accent.withValues(alpha: 0.08),
+    highlightColor:  Colors.transparent,
+    dividerColor:    RamaColors.darkBorder,
+    cardColor:       RamaColors.darkCard,
+    dialogTheme:     const DialogThemeData(
+      backgroundColor: RamaColors.darkCard,
+    ),
+    bottomSheetTheme: const BottomSheetThemeData(
+      backgroundColor: RamaColors.darkCard,
+    ),
+    sliderTheme: SliderThemeData(
+      activeTrackColor:   _accent,
+      thumbColor:         _accent,
+      inactiveTrackColor: RamaColors.darkBorder2,
+      overlayColor:       _accent.withValues(alpha: 0.12),
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor:  WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected) ? Colors.white : RamaColors.darkTextSub,
+      ),
+      trackColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected)
+            ? _accent
+            : RamaColors.darkBorder2,
+      ),
+    ),
   );
 
   ThemeData get _light => ThemeData(
     brightness:             Brightness.light,
     scaffoldBackgroundColor: RamaColors.lightBg,
     useMaterial3:           true,
-    fontFamily:             'sans-serif',
+    textTheme:              _textTheme(RamaColors.lightText),
     colorScheme: ColorScheme.light(
-      primary: _accent,
-      surface: RamaColors.lightSurface,
+      primary:   _accent,
+      surface:   RamaColors.lightSurface,
       onSurface: RamaColors.lightText,
     ),
     textSelectionTheme: TextSelectionThemeData(
-      cursorColor:         _accent,
-      selectionColor:      _accent.withValues(alpha: 0.25),
+      cursorColor:          _accent,
+      selectionColor:       _accent.withValues(alpha: 0.25),
       selectionHandleColor: _accent,
     ),
-    splashColor: _accent.withValues(alpha: 0.06),
+    splashColor:    _accent.withValues(alpha: 0.06),
     highlightColor: Colors.transparent,
+    dividerColor:   RamaColors.lightBorder,
+    cardColor:      RamaColors.lightCard,
+    sliderTheme: SliderThemeData(
+      activeTrackColor:   _accent,
+      thumbColor:         _accent,
+      inactiveTrackColor: RamaColors.lightBorder2,
+      overlayColor:       _accent.withValues(alpha: 0.12),
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected) ? Colors.white : RamaColors.lightTextSub,
+      ),
+      trackColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected)
+            ? _accent
+            : RamaColors.lightBorder2,
+      ),
+    ),
   );
 }
 

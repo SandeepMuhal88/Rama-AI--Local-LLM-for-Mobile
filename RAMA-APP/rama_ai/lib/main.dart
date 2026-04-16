@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
 import 'core/app_theme.dart';
+import 'core/chat_controller.dart';
 import 'screens/splash_screen.dart';
 
 void main() async {
@@ -27,13 +29,18 @@ void main() async {
 
   // System UI chrome
   SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-    statusBarColor:                  Colors.transparent,
-    statusBarIconBrightness:         isDark ? Brightness.light : Brightness.dark,
-    systemNavigationBarColor:        isDark ? RamaColors.darkBg : RamaColors.lightBg,
+    statusBarColor:                    Colors.transparent,
+    statusBarIconBrightness:           isDark ? Brightness.light : Brightness.dark,
+    systemNavigationBarColor:          isDark ? RamaColors.darkBg : RamaColors.lightBg,
     systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
   ));
 
-  runApp(RamaApp(theme: appTheme));
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => ChatController(),
+      child:  RamaApp(theme: appTheme),
+    ),
+  );
 }
 
 // ─── Root widget ──────────────────────────────────────────────────────────────
