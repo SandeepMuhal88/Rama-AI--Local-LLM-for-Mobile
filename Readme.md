@@ -146,6 +146,85 @@ cd Rama-AI--Local-LLM-for-Mobile
 
 ---
 
+### Step 2.5 — ⚡ Setup llama.cpp Engine (REQUIRED)
+
+> ⚠️ **This step is mandatory.** Without the `llama.cpp` library, the native C++ inference engine will not compile and the app will crash on launch.
+
+The project uses `llama.cpp` as a **git submodule** (embedded inside the Android CPP folder). You must set it up using **one of the two methods** below.
+
+---
+
+#### ✅ Method A: If you used `git clone` (Recommended)
+
+Run these commands after cloning:
+
+```bash
+# Initialize and download the llama.cpp submodule
+git submodule update --init --recursive
+```
+
+This will automatically download and place `llama.cpp` into:
+```
+RAMA-APP/rama_ai/android/app/src/main/cpp/llama.cpp/
+```
+
+Verify the folder is **not empty** — it should contain `llama.h`, `llama.cpp`, `CMakeLists.txt`, etc.
+
+```powershell
+# Check (should list many files, not be empty)
+dir RAMA-APP\rama_ai\android\app\src\main\cpp\llama.cpp
+```
+
+---
+
+#### ✅ Method B: If you downloaded the ZIP from GitHub
+
+When you download a repository as a ZIP from GitHub, **submodules are NOT included** — the `llama.cpp/` folder will be empty. Follow these steps:
+
+**Option B-1 — Clone llama.cpp separately:**
+
+```bash
+# Navigate to the cpp folder
+cd RAMA-APP\rama_ai\android\app\src\main\cpp
+
+# Remove the empty llama.cpp folder
+rmdir llama.cpp
+
+# Clone the correct version of llama.cpp
+git clone https://github.com/ggerganov/llama.cpp.git llama.cpp
+```
+
+> ⚠️ **Important:** The project was built against a specific commit of `llama.cpp`. Using the latest version may cause API mismatches. To use the exact tested version:
+>
+> ```bash
+> cd llama.cpp
+> # Checkout the specific commit used in this project
+> git checkout b4739
+> ```
+> If that fails, simply use the latest — it usually works for the API calls used.
+
+**Option B-2 — Download llama.cpp ZIP directly:**
+
+1. Go to: https://github.com/ggerganov/llama.cpp
+2. Click **Code → Download ZIP**
+3. Extract and rename the folder to `llama.cpp`
+4. Copy/move it to:
+   ```
+   RAMA-APP\rama_ai\android\app\src\main\cpp\llama.cpp\
+   ```
+
+**After placing llama.cpp, verify these files exist:**
+```
+android/app/src/main/cpp/llama.cpp/
+├── llama.h          ✅ Required
+├── llama.cpp        ✅ Required  
+├── ggml.h           ✅ Required
+├── ggml.c           ✅ Required
+└── CMakeLists.txt   ✅ Required
+```
+
+---
+
 ### Step 3 — Configure Flutter for Android
 
 ```powershell
@@ -316,10 +395,12 @@ The `llama.cpp` submodule must be present inside:
 ```
 RAMA-APP/rama_ai/android/app/src/main/cpp/llama.cpp/
 ```
-If the folder is empty, the submodule was not initialized:
+**If you used `git clone`** — the folder is empty because submodule wasn't pulled:
 ```bash
 git submodule update --init --recursive
 ```
+**If you downloaded a ZIP from GitHub** — submodules are never included in ZIPs.
+Follow **Step 2.5 → Method B** above to manually place `llama.cpp`.
 
 ### ❌ App crashes on model load
 - Ensure your device has at least **2 GB of FREE RAM**
@@ -393,21 +474,27 @@ provider:         ^6.1.2       # State management
 ```powershell
 # 1. Clone
 git clone https://github.com/SandeepMuhal88/Rama-AI--Local-LLM-for-Mobile.git
-cd Rama-AI--Local-LLM-for-Mobile\RAMA-APP\rama_ai
+cd Rama-AI--Local-LLM-for-Mobile
 
-# 2. Get packages
+# 2. ⚡ IMPORTANT: Pull llama.cpp engine (submodule)
+git submodule update --init --recursive
+
+# 3. Go to Flutter project
+cd RAMA-APP\rama_ai
+
+# 4. Get packages
 flutter pub get
 
-# 3. Check setup
+# 5. Check setup
 flutter doctor
 
-# 4. Run on device
+# 6. Run on device
 flutter run
 
-# 5. Build release APK
+# 7. Build release APK
 flutter build apk --release --target-platform android-arm64
 
-# 6. Install APK directly
+# 8. Install APK directly
 flutter install
 ```
 
