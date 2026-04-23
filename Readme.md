@@ -378,19 +378,19 @@ The **Model Manager** screen inside the app handles downloading, verifying, and 
 
 ## 🔧 Troubleshooting
 
-### ❌ `flutter doctor` shows Android SDK issues
+###  `flutter doctor` shows Android SDK issues
 ```powershell
 # Set Android SDK path explicitly
 flutter config --android-sdk "C:\Users\<YourName>\AppData\Local\Android\Sdk"
 flutter doctor --android-licenses
 ```
 
-### ❌ NDK not found / CMake error
+###  NDK not found / CMake error
 - Open Android Studio → **SDK Manager → SDK Tools**
 - Install **NDK (Side by side)** version `28.2.13676358`
 - Install **CMake** (latest version)
 
-### ❌ Build fails with `llama.h: No such file`
+###  Build fails with `llama.h: No such file`
 The `llama.cpp` submodule must be present inside:
 ```
 RAMA-APP/rama_ai/android/app/src/main/cpp/llama.cpp/
@@ -402,17 +402,17 @@ git submodule update --init --recursive
 **If you downloaded a ZIP from GitHub** — submodules are never included in ZIPs.
 Follow **Step 2.5 → Method B** above to manually place `llama.cpp`.
 
-### ❌ App crashes on model load
+###  App crashes on model load
 - Ensure your device has at least **2 GB of FREE RAM**
 - Use the Q4_K_M quantized model only (not larger variants)
 - Check storage: the app needs ~1 GB free space
 
-### ❌ `flutter run` shows "No devices found"
+###  `flutter run` shows "No devices found"
 - Enable USB Debugging on your Android device
 - Try a different USB cable or port
 - Run `adb devices` to check device visibility
 
-### ❌ Slow inference (< 5 tokens/second)
+###  Slow inference (< 5 tokens/second)
 - Close background apps to free RAM
 - Enable **Performance Mode** in device settings
 - The app uses ARM NEON intrinsics for acceleration automatically
