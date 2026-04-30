@@ -16,23 +16,32 @@ class LogoBadge extends StatelessWidget {
       width: size, height: size,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [accent, accent.withValues(alpha: 0.70)],
+          colors: [
+            const Color(0xFF1A1400),
+            const Color(0xFF0D0D0D),
+          ],
           begin: Alignment.topLeft,
           end:   Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(size * 0.28),
+        border: Border.all(
+          color: accent.withValues(alpha: 0.55),
+          width: size > 40 ? 1.5 : 1.0,
+        ),
         boxShadow: [
           BoxShadow(
-            color:      accent.withValues(alpha: 0.30),
-            blurRadius: size * 0.6,
-            offset:     Offset(0, size * 0.10),
+            color:      accent.withValues(alpha: 0.35),
+            blurRadius: size * 0.7,
+            offset:     Offset(0, size * 0.08),
           ),
         ],
       ),
-      child: Icon(
-        Icons.auto_awesome_rounded,
-        color: Colors.white,
-        size:  size * 0.46,
+      child: Center(
+        child: Icon(
+          Icons.hub_rounded,
+          color: accent,
+          size:  size * 0.50,
+        ),
       ),
     );
   }

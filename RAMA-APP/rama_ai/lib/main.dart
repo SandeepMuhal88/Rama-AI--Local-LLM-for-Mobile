@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
 import 'core/app_theme.dart';
 import 'core/chat_controller.dart';
@@ -15,64 +14,35 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  // Load persisted preferences
-  final prefs     = await SharedPreferences.getInstance();
-  final isDark    = prefs.getBool('theme_dark')  ?? true;
-  final accentIdx = (prefs.getInt('accent_idx')  ?? 0)
-      .clamp(0, kAccentPresets.length - 1);
+  // Always dark — no persisted preference needed
+  appTheme = AppTheme();
 
-  // Initialise global theme
-  appTheme = AppTheme(
-    isDark: isDark,
-    accent: kAccentPresets[accentIdx],
-  );
-
-  // System UI chrome
-  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+  // System UI chrome — always dark style
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor:                    Colors.transparent,
-    statusBarIconBrightness:           isDark ? Brightness.light : Brightness.dark,
-    systemNavigationBarColor:          isDark ? RamaColors.darkBg : RamaColors.lightBg,
-    systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+    statusBarIconBrightness:           Brightness.light,
+    systemNavigationBarColor:          RamaColors.darkBg,
+    systemNavigationBarIconBrightness: Brightness.light,
   ));
 
   runApp(
     ChangeNotifierProvider(
       create: (_) => ChatController(),
-      child:  RamaApp(theme: appTheme),
+      child:  const RamaApp(),
     ),
   );
 }
 
 // ─── Root widget ──────────────────────────────────────────────────────────────
-class RamaApp extends StatefulWidget {
-  final AppTheme theme;
-  const RamaApp({super.key, required this.theme});
-
-  @override
-  State<RamaApp> createState() => _RamaAppState();
-}
-
-class _RamaAppState extends State<RamaApp> {
-  @override
-  void initState() {
-    super.initState();
-    widget.theme.addListener(_rebuild);
-  }
-
-  void _rebuild() { if (mounted) setState(() {}); }
-
-  @override
-  void dispose() {
-    widget.theme.removeListener(_rebuild);
-    super.dispose();
-  }
+class RamaApp extends StatelessWidget {
+  const RamaApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title:                    'RAMA AI',
       debugShowCheckedModeBanner: false,
-      theme:                    widget.theme.themeData,
+      theme:                    appTheme.themeData,
       home:                     const SplashScreen(),
     );
   }

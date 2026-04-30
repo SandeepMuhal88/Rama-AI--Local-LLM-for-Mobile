@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
@@ -94,12 +93,6 @@ class _SettingsScreenState extends State<SettingsScreen>
                       builder: (_, ctrl, __) => Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ── Appearance Section ──────────────────────────
-                          _sectionLabel('Appearance'),
-                          _themeToggle(ctrl),
-                          const SizedBox(height: 16),
-                          _accentPicker(),
-                          const SizedBox(height: 28),
 
                           // ── Profile Section ─────────────────────────────
                           _sectionLabel('Profile'),
@@ -220,119 +213,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     );
   }
 
-  // ── Theme toggle ───────────────────────────────────────────────────────────
-  Widget _themeToggle(ChatController ctrl) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color:        _surface,
-        borderRadius: BorderRadius.circular(14),
-        border:       Border.all(color: _border),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            appTheme.isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
-            color: _accent,
-            size:  18,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Dark Mode',
-                    style: GoogleFonts.inter(
-                      color:      _text,
-                      fontWeight: FontWeight.w600,
-                      fontSize:   14,
-                    )),
-                Text(appTheme.isDark ? 'Currently dark' : 'Currently light',
-                    style: GoogleFonts.inter(color: _dim, fontSize: 11)),
-              ],
-            ),
-          ),
-          Switch(
-            value:     appTheme.isDark,
-            onChanged: (_) async {
-              appTheme.toggle();
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setBool('theme_dark', appTheme.isDark);
-              SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-                statusBarColor:          Colors.transparent,
-                statusBarIconBrightness: appTheme.isDark
-                    ? Brightness.light
-                    : Brightness.dark,
-              ));
-              if (mounted) setState(() {});
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Accent color picker ────────────────────────────────────────────────────
-  Widget _accentPicker() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color:        _surface,
-        borderRadius: BorderRadius.circular(14),
-        border:       Border.all(color: _border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Accent Color',
-              style: GoogleFonts.inter(
-                color:      _text,
-                fontWeight: FontWeight.w600,
-                fontSize:   14,
-              )),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: List.generate(kAccentPresets.length, (i) {
-              final c       = kAccentPresets[i];
-              final current = appTheme.accent == c;
-              return GestureDetector(
-                onTap: () async {
-                  appTheme.setAccent(c);
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setInt('accent_idx', i);
-                  if (mounted) setState(() {});
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  width:  36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color:        c,
-                    borderRadius: BorderRadius.circular(10),
-                    border: current
-                        ? Border.all(color: Colors.white, width: 2.5)
-                        : Border.all(color: Colors.transparent, width: 2.5),
-                    boxShadow: current
-                        ? [BoxShadow(
-                            color:      c.withValues(alpha: 0.45),
-                            blurRadius: 10,
-                          )]
-                        : [],
-                  ),
-                  child: current
-                      ? const Icon(Icons.check_rounded,
-                          color: Colors.white, size: 18)
-                      : null,
-                ),
-              );
-            }),
-          ),
-        ],
-      ),
-    );
-  }
+  // Appearance section removed — app is permanently dark with fixed accent.
 
   // ── Text field helper ──────────────────────────────────────────────────────
   Widget _textField({

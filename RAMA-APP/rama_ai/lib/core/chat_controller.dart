@@ -53,20 +53,20 @@ class ChatController extends ChangeNotifier {
   // ── Sliding-window config ─────────────────────────────────────────────────
   // How many recent messages (in addition to the system prompt) to pass to
   // the model. Each user+ai pair ≈ 2 items. 12 = ~6 turns of context.
-  static const int _maxContextMessages = 12;
+  static const int _maxContextMessages = 8;
 
   // ── Preset instant replies ─────────────────────────────────────────────────
   static final _kPresetReplies = <RegExp, List<String>>{
     RegExp(r'^h+e+l+o+[!?.]*$'):
-        ['Hey there! 👋 How can I help you today?', 'Hello! 😊 What can I do for you?'],
+        ['Hey there! 👋 How can I help?', 'Hello! 😊 What can I do for you?'],
     RegExp(r'^h+i+[!?.]*$'):
         ['Hi! 👋 How can I help?', 'Hello! Ask me anything.'],
     RegExp(r'^hey+[!?.]*$'):
-        ['Hey! 👋 What\'s up?', 'Hey! Ready to help!'],
+        ['Hey! 👋 What\'s up?', 'Hey there! Ready to help!'],
     RegExp(r"^how\s+are\s+(you|u)[!?.]*$"):
-        ['I\'m sharp and ready to help! 😊 What\'s on your mind?'],
+        ['I\'m sharp and ready! 😊 What\'s on your mind?'],
     RegExp(r'^good\s+morning[!?.]*$'):
-        ['Good morning! ☀️ How can I help you today?'],
+        ['Good morning! ☀️ How can I help?'],
     RegExp(r'^good\s+evening[!?.]*$'):
         ['Good evening! 🌙 What\'s on your mind?'],
     RegExp(r'^good\s+night[!?.]*$'):
@@ -76,7 +76,17 @@ class ChatController extends ChangeNotifier {
     RegExp(r'^(bye|goodbye|see\s+you|cya)[!?.]*$'):
         ['Goodbye! 👋 Come back anytime.'],
     RegExp(r'^who\s+are\s+you[!?.]*$'):
-        ['I\'m RAMA — your 100% offline AI assistant! 🤖 I run entirely on your device with no internet needed.'],
+        ['I\'m RAMA — your 100% offline AI assistant! 🤖 I run entirely on your device, no internet needed.'],
+    RegExp(r'^what\s+(is|are)\s+your\s+name[!?.]*$'):
+        ['I\'m RAMA AI — your private, offline AI assistant! 🤖'],
+    RegExp(r'^(ok|okay|sure|got\s+it|understood)[!?.]*$'):
+        ['Great! Anything else I can help with? 😊', 'Got it! Let me know if you need anything.'],
+    RegExp(r'^(yes|yeah|yep|yup)[!?.]*$'):
+        ['Sounds good! How can I assist? 😊'],
+    RegExp(r'^(no|nope|nah)[!?.]*$'):
+        ['No problem! Feel free to ask me anything anytime.'],
+    RegExp(r'^(what\s+can\s+you\s+do|help)[!?.]*$'):
+        ['I can answer questions, write code, explain concepts, summarize text, and much more — all 100% offline! 🤖 Try asking me anything.'],
   };
 
   String? _instantReply(String text) {
